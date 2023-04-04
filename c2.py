@@ -522,6 +522,13 @@ def generateCertificate():
     if dnsCloaked == True:
         return ""
     private_key, public_key = generate_RSA_keypair()
+    privkey_str = private_key.private_bytes(
+    encoding=serialization.Encoding.PEM,
+    format=serialization.PrivateFormat.PKCS8,
+    encryption_algorithm=serialization.NoEncryption()
+    )   
+
+    print(privkey_str.decode('utf-8'))
     public_pem = base64.b32encode(public_key.public_bytes(encoding=serialization.Encoding.PEM,format=serialization.PublicFormat.SubjectPublicKeyInfo))
     public_pem_split = [public_pem[i: i + 220] for i in range(0, len(public_pem), 220)]
     m = hashlib.sha256()
@@ -613,7 +620,7 @@ Pwned by trololo gang! kek kek keke kekw
 [bold green]
     """)
     console.print("Ctrl+C is disabled! please use \"exit\" to exit from Melizia\nUse \"help\" to see the available commands!\n")
-    signal.signal(signal.SIGINT, signal.SIG_IGN)
+#    signal.signal(signal.SIGINT, signal.SIG_IGN)
     serverThread = threading.Thread(target=server)
     commandThread = threading.Thread(target=command)
     serverThread.start()
