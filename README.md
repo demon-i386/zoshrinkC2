@@ -6,3 +6,5 @@ DNS over HTTPS targeted malware (only runs once)
 </p>
 
 ## Diagram
+
+![diagram](https://raw.githubusercontent.com/demon-i386/MeliziaC2/3070e0b40bcf8af81edb5a77bf45ab9b91e51d03/melizia_diagram.svg?token=ASA7D54WRCJ7MFFK53WDQH3EFPDZS)
