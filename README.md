@@ -2,7 +2,7 @@
 DNS over HTTPS targeted malware (only runs once)
 
 <p align="center">
-  <img src="./logo.png" width="500">
+  <img src="./logo.jpg" width="500">
 </p>
 
 ## Diagram
