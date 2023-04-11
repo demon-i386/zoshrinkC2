@@ -1,0 +1,33 @@
+[package]
+name = "migrate"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+ethers = "1.0.2"
+web3 = "0.17.0"
+tokio = "1.27.0"
+aes="0.7.5"
+base64 = "0.21.0"
+cfb-mode = "0.8.2"
+hex-literal = "0.3.4"
+generic-array = "0.14.7"
+block-modes="0.8.1"
+hex="0.4.3"
+hyper = "0.14.25"
+url = "2.3.1"
+http = "0.2.9"
+reqwest = "0.11.16"
+regex = "1.7.3"
+fancy-regex = "0.11.0"
+base32 = "0.4.0"
+rustls = "0.21.0"
+openssl = "0.10.49"
+rsa = "0.8.2"
+pkcs8 = "0.10.1"
+pem = "1.1.1"
+sha2 = "0.10.6"
+lazy_static = "1.4.0"
+serde_json = "1.0.95"
