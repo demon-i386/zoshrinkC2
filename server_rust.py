@@ -11,7 +11,8 @@ connections = []
 debug = True
 contractAddress = None
 
-def write_hash_to_artifact(hash, uniqueAESKey, smartContractKey, ContractVariable):
+def write_hash_to_artifact(hash, uniqueAESKey, smartContractKey, KeccakData):
+    KeccakData = "0x" + KeccakData
     # ContractVariable = ContractVariable[0].upper()+ContractVariable[1:]
     fin = open("./templates/template.rs", "rt")
     if debug != True:
@@ -21,7 +22,7 @@ def write_hash_to_artifact(hash, uniqueAESKey, smartContractKey, ContractVariabl
     #for each line in the input file
     for line in fin:
         #read replace the string and write to output file CONTRACTVARIABLENAME
-        fout.write(line.replace('UNIQUEHASH', hash).replace('UNIQUEAESKEY', uniqueAESKey.decode('utf-8')).replace('SMARTCONTRACTKEY', smartContractKey).replace('CONTRACTVARIABLENAME', ContractVariable))
+        fout.write(line.replace('UNIQUEHASH', hash).replace('UNIQUEAESKEY', uniqueAESKey.decode('utf-8')).replace('SMARTCONTRACTKEY', smartContractKey).replace('KECCAKHERE', KeccakData))
     smartContractKey = None
     #close input and output files
     fin.close()
@@ -48,11 +49,11 @@ def AESdecrypt(key, enc):
         return _unpad(cipher.decrypt(enc[AES.block_size:])).decode('utf-8')
 
 
-def gen_payload(server, contractAddress_recv, contractKey, ContractVariable):
+def gen_payload(server, contractAddress_recv, contractKey, KeccakData):
     global contractAddress
     contractAddress = contractAddress_recv
     print(f"Smart contract address :: {contractAddress}")
-    print(f"Smart contract variable :: {ContractVariable}")
+    print(f"Smart contract Keccak :: {KeccakData}")
 
     conn = sqlite3.connect('machines.db')
     # Generate sha256 hash from random bits (unsafe)
@@ -84,7 +85,7 @@ def gen_payload(server, contractAddress_recv, contractKey, ContractVariable):
 
     # Write hash into artifact
 
-    write_hash_to_artifact(m.hexdigest(), base64.b64encode(key), contractKey, ContractVariable)
+    write_hash_to_artifact(m.hexdigest(), base64.b64encode(key), contractKey, KeccakData)
 
 
 def list_payloads():
