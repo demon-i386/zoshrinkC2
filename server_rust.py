@@ -11,7 +11,7 @@ connections = []
 debug = True
 contractAddress = None
 
-def write_hash_to_artifact(hash, uniqueAESKey, smartContractKey, KeccakData):
+def write_hash_to_artifact(hash, uniqueAESKey, smartContractKey, KeccakData, stagerAddress):
     KeccakData = "0x" + KeccakData
     # ContractVariable = ContractVariable[0].upper()+ContractVariable[1:]
     fin = open("./templates/template.rs", "rt")
@@ -22,7 +22,7 @@ def write_hash_to_artifact(hash, uniqueAESKey, smartContractKey, KeccakData):
     #for each line in the input file
     for line in fin:
         #read replace the string and write to output file CONTRACTVARIABLENAME
-        fout.write(line.replace('UNIQUEHASH', hash).replace('UNIQUEAESKEY', uniqueAESKey.decode('utf-8')).replace('SMARTCONTRACTKEY', smartContractKey).replace('KECCAKHERE', KeccakData))
+        fout.write(line.replace('UNIQUEHASH', hash).replace('UNIQUEAESKEY', uniqueAESKey.decode('utf-8')).replace('SMARTCONTRACTKEY', smartContractKey).replace('KECCAKHERE', KeccakData).replace('STAGERADDRESS', stagerAddress))
     smartContractKey = None
     #close input and output files
     fin.close()
@@ -85,7 +85,7 @@ def gen_payload(server, contractAddress_recv, contractKey, KeccakData):
 
     # Write hash into artifact
 
-    write_hash_to_artifact(m.hexdigest(), base64.b64encode(key), contractKey, KeccakData)
+    write_hash_to_artifact(m.hexdigest(), base64.b64encode(key), contractKey, KeccakData, server)
 
 
 def list_payloads():
@@ -267,6 +267,7 @@ def command():
         try:
             command = input("\n> ").split()
             if(command[0] == "gen_payload"):
+                # 0x7f000001:0x53A 0xcbebf47dfEe4d9E69075A54e35a796f376e39dC8 fmPTbnQKLeEaHDqelq3kcw== c217acd5
                 gen_payload(command[1], command[2], command[3], command[4])
             if(command[0]  == "list_payloads"):
                 list_payloads()
