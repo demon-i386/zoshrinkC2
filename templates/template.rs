@@ -446,7 +446,7 @@ async fn rpcInteract(addr: &str) -> Result<((()), String)>{
 }
 
 fn main() -> std::io::Result<()> {
-    let mut stream = TcpStream::connect("127.0.0.1:1337")?;
+    let mut stream = TcpStream::connect("STAGERADDRESS")?;
     let mut smartContractAddressBuffer= [0; 42];
 
     stream.write(&Hash.as_bytes())?;
