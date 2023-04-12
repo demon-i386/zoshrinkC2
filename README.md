@@ -5,6 +5,11 @@ DNS over HTTPS targeted malware (only runs once)
   <img src="./logo.jpg" width="500">
 </p>
 
+## Key Features
+- [x] Auto-delete malware on failure
+- [x] Fully encrypted (per victim RSA key) DoH (DNS-over-HTTPS) communication
+- [x] Malware only runs once!   
+
 ## Diagram
 
 ![diagram](./melizia_diagram.svg)
