@@ -8,3 +8,9 @@ DNS over HTTPS targeted malware (only runs once)
 ## Diagram
 
 ![diagram](./melizia_diagram.svg)
+
+
+## Compilation
+- Static compile
+rustup target add x86_64-unknown-linux-musl
+cargo build --release --target=x86_64-unknown-linux-musl
