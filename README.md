@@ -11,6 +11,8 @@ DNS over HTTPS targeted malware (only runs once)
 
 
 ## Compilation
-- Static compile
+###### Static compile
+```
 rustup target add x86_64-unknown-linux-musl
 cargo build --release --target=x86_64-unknown-linux-musl
+```
