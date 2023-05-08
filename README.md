@@ -106,4 +106,34 @@ rustup target add x86_64-pc-windows-gnu
 cargo build --release --target=x86_64-pc-windows-gnu
 ```
 
+# Donate!
+```
+Pix:
+997f8e1c-5ea4-42d8-9a52-2d1a852e4274
+
+https://nubank.com.br/pagar/sqtrd/oGVMf6g6Pa
+
+Cripto
+Direct:
+BTC
+1ACguGNLXik3sKYShtEuUX4ahYuM3yPFQq
+
+MATIC
+0x3b1699bbd7f67db0987ebef0f5f7b00c12fefddf
+
+ETH
+0x3b1699bbd7f67db0987ebef0f5f7b00c12fefddf
+
+Metamask:
+0x30f2F62FD0700af80Deb70D520f07deE9D411a33
+
+XMR
+83dsNXwoxmX54CNrv6WrB1dJeiyttgBZM2JFvUh43MMrDghfZmfcsB7cGywVL1X69YQBcMsxm8mbdJhEdzCjgdaETKawxFK
+
+SOL
+2DsFcwmKtqCCS2WhVM2FCt4LJa18ugk5o26sarbhcqnR
+
+All the currencies are supported!
+https://nowpayments.io/donation/demoni3864
+```
 
