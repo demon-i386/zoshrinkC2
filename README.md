@@ -20,4 +20,9 @@ DNS over HTTPS targeted malware (only runs once)
 ```
 rustup target add x86_64-unknown-linux-musl
 cargo build --release --target=x86_64-unknown-linux-musl
+
+or (windows)
+
+rustup target add x86_64-pc-windows-gnu
+cargo build --release --target=x86_64-pc-windows-gnu
 ```
