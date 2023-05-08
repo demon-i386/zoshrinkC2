@@ -5,7 +5,8 @@ from Crypto.Random import get_random_bytes
 from Crypto.Util.Padding import unpad
 from Crypto import Random
 
-# Global variable that mantain client's connections
+# grettz to every0ne! hack the pl4net!!!!!!!!!!!!!!!!!!!!!!!!!!
+
 connections = []
 
 debug = True
