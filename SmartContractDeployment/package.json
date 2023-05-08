@@ -1,0 +1,18 @@
+{
+  "name": "melizia_smartcontract",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "dotenv": "^16.0.3"
+  },
+  "devDependencies": {
+    "@nomiclabs/hardhat-waffle": "^2.0.5",
+    "ethereum-waffle": "^4.0.10"
+  }
+}
