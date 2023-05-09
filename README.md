@@ -17,12 +17,28 @@ DNS over HTTPS targeted malware (only runs once)
 
 ## Usage Steps
 
-
 ###### 0 - Edit contract_generator.py file
 ```
 modify C2ServerIP variable:
 C2ServerIP = "attacker.domain.com"
 ```
+
+Create a polygon testnet API key, for smart contract deployment
+https://auth.alchemy.com/signup
+
+Edit SmartContractDeployment/.env
+```
+API_URL = "https://polygon-mumbai.g.alchemy.com/v2/[API KEY]"
+PRIVATE_KEY = "[WALLET PRIVATE KEY]"
+```
+
+Download hardhat, solc (0.8.17+commit.8df45f5f.Emscripten.clang) and abigen (1.11.5-unstable-f7336573-20230316)
+
+https://hardhat.org
+https://github.com/ethereum/solc-js
+https://geth.ethereum.org/docs/tools/abigen
+
+attention to hardcoded binaries paths in contract_generator.py script!
 
 ###### 1 - Generate and deploy smart contract (contains the AES encrypted DNS address of server)
 ```
