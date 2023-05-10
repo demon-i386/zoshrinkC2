@@ -1,6 +1,9 @@
 # MeliziaC2
 DNS over HTTPS targeted malware (only runs once)
 
+! Some functions are not available yet !
+! WIP, don't use in production !
+
 <p align="center">
   <img src="./logo.jpg" width="500">
 </p>
@@ -13,6 +16,14 @@ DNS over HTTPS targeted malware (only runs once)
 ## Diagram
 
 ![diagram](./melizia_diagram.svg)
+
+## Images
+
+![image](https://github.com/demon-i386/MeliziaC2/assets/75624951/ce5a8c9b-cb25-45dc-98b5-c92c55d30e62)
+
+![image](https://github.com/demon-i386/MeliziaC2/assets/75624951/0fad01fb-a20d-4049-9222-25834a6d725e)
+
+![image](https://github.com/demon-i386/MeliziaC2/assets/75624951/406bfc81-e589-4d78-90b7-a0ce71b7ef5f)
 
 
 ## Usage Steps
