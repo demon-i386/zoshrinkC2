@@ -163,8 +163,7 @@ cargo build --release --target=x86_64-unknown-linux-musl
 
 or (windows)
 
-rustup target add x86_64-pc-windows-gnu
-cargo build --release --target=x86_64-pc-windows-gnu
+RUSTFLAGS="-C debuginfo=0 -C strip=symbols -C debug-assertions=no -C panic=abort -C target-feature=+crt-static -C relocation-model=pic split-debuginfo=packed --remap-path-prefix $HOME=~" cargo xwin build --target x86_64-pc-windows-msv
 ```
 
 # Donate!
