@@ -26,6 +26,9 @@ DNS over HTTPS targeted malware (only runs once)
 ![image](https://github.com/demon-i386/MeliziaC2/assets/75624951/406bfc81-e589-4d78-90b7-a0ce71b7ef5f)
 
 
+### Requires
+https://github.com/demon-i386/throatcut
+
 ## Usage Steps
 
 ###### 0 - Edit contract_generator.py file
